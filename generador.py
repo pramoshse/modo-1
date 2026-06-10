@@ -55,9 +55,9 @@ st.markdown(
         }
 
         .status-ok {
-            border: 1px solid #BBF7D0;
-            background: #F0FDF4;
-            color: #166534;
+            border: 1px solid #BAE6FD;
+            background: #F0F9FF;
+            color: #0369A1;
             border-radius: 10px;
             padding: 0.8rem 1rem;
             font-size: 0.9rem;
@@ -75,6 +75,10 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# Color principal Modo 1
+MODO1_COLOR = "#00B0F0"
+MODO1_COLOR_HEX = "00B0F0"  # Sin # para uso en Word/Excel
 
 
 # ============================================================
@@ -109,44 +113,6 @@ def _get_nested(source: Dict[str, Any], path: Iterable[str], default: Any = "") 
             return default
         current = current[key]
     return current if current not in (None, "") else default
-
-
-def _normalize_date_text(value: Any) -> str:
-    if isinstance(value, datetime.datetime):
-        return value.strftime("%d/%m/%Y")
-    if isinstance(value, datetime.date):
-        return value.strftime("%d/%m/%Y")
-    raw = _normalize(value)
-    if not raw:
-        return ""
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.datetime.strptime(raw[:19], fmt).strftime("%d/%m/%Y")
-        except Exception:
-            continue
-    return raw
-
-def _extract_borrador_reference(payload: Dict[str, Any], widgets: Dict[str, Any], computed: Dict[str, Any]) -> tuple[str, str]:
-    code_keys = [
-        "codigo_borrador", "código_borrador", "codigo", "código", "id_borrador", "borrador_id",
-        "borrador_codigo", "draft_code", "risk_assessment_code", "codigo_evaluacion_riesgos",
-    ]
-    date_keys = [
-        "fecha_borrador", "fecha", "fecha_generacion", "fecha_creacion", "created_at", "timestamp",
-        "draft_date", "risk_assessment_date", "fecha_evaluacion_riesgos",
-    ]
-    codigo = _get_from_dict(payload, code_keys, "") or _get_from_dict(widgets, code_keys, "") or _get_from_dict(computed, code_keys, "")
-    fecha = _get_from_dict(payload, date_keys, "") or _get_from_dict(widgets, date_keys, "") or _get_from_dict(computed, date_keys, "")
-    if not codigo:
-        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-        codigo = _get_from_dict(metadata, code_keys, "")
-        fecha = fecha or _get_from_dict(metadata, date_keys, "")
-    return _normalize(codigo), _normalize_date_text(fecha)
-
-def _format_evaluacion_riesgos(codigo_borrador: Any, fecha_borrador: Any) -> str:
-    codigo_txt = _normalize(codigo_borrador) or "sin código informado"
-    fecha_txt = _normalize_date_text(fecha_borrador) or "sin fecha informada"
-    return f"Evaluación de riesgos: borrador importado {codigo_txt} · Fecha {fecha_txt}"
 
 def _split_tasks(raw: Any) -> List[str]:
     if raw is None:
@@ -231,14 +197,6 @@ def _local_file_data_uri(candidates: Iterable[str]) -> str:
             continue
     return ""
 
-def _photo_data_uri(payload: Dict[str, Any]) -> str:
-    photo = payload.get("equipment_photo") or {}
-    content = photo.get("content_base64")
-    mime = photo.get("mime_type") or "image/png"
-    if not content:
-        return ""
-    return f"data:{mime};base64,{content}"
-
 def _logo_data_uri(uploaded_logo=None) -> str:
     uploaded_uri = _uploaded_file_data_uri(uploaded_logo)
     if uploaded_uri:
@@ -254,7 +212,6 @@ def _logo_data_uri(uploaded_logo=None) -> str:
     )
 
 def _lsr_data_uri() -> str:
-    """Carga la imagen LSR.png desde la carpeta de la aplicación."""
     base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
     return _local_file_data_uri(
         [
@@ -277,11 +234,24 @@ def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
         _get_from_dict(widgets, ["modo_final", "modo_convalidado", "modo_resultante"], ""),
     )
 
+    # Prioridad: tareas_manuales > tareas_predefinidas > otras claves
     tasks_raw = _get_from_dict(
         widgets,
-        ["tareas_predefinidas", "tareas_predefinidas_txt", "tareas_preseleccionadas", "tareas_seleccionadas"],
+        ["tareas_manuales"],
         "",
     )
+    if not tasks_raw:
+        tasks_raw = _get_from_dict(
+            payload,
+            ["tareas_manuales"],
+            "",
+        )
+    if not tasks_raw:
+        tasks_raw = _get_from_dict(
+            widgets,
+            ["tareas_predefinidas", "tareas_predefinidas_txt", "tareas_preseleccionadas", "tareas_seleccionadas"],
+            "",
+        )
     if not tasks_raw:
         tasks_raw = _get_from_dict(
             payload,
@@ -295,38 +265,31 @@ def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
             "",
         )
     tasks = _split_tasks(tasks_raw)
-
-    tareas_manuales_raw = _get_from_dict(
-        widgets,
-        ["tareas_manuales", "tareas_manual", "manual_tasks", "tareas_adicionales", "actividades_manuales"],
-        "",
-    )
-    if not tareas_manuales_raw:
-        tareas_manuales_raw = _get_from_dict(
-            payload,
-            ["tareas_manuales", "tareas_manual", "manual_tasks", "tareas_adicionales", "actividades_manuales"],
-            "",
-        )
-    tareas_manuales = _split_tasks(tareas_manuales_raw)
-    if tareas_manuales:
-        for manual_task in tareas_manuales:
-            if manual_task not in tasks:
-                tasks.append(manual_task)
-
     if not tasks:
         tasks = [
-            "Intervención operativa rutinaria, breve y prevista mediante guarda o puerta enclavada.",
-            "Destrabe, acomodamiento o retiro menor de producto sin anular dispositivos de seguridad.",
-            "Acceso limitado al punto autorizado, manteniendo el interlock operativo y sin exposición a energías peligrosas no controladas.",
+            "Destrabe o liberación de producto atascado en zona accesible mediante guarda enclavada.",
+            "Limpieza de obstrucción menor sin herramientas ni intervención sobre energías.",
+            "Corrección de condición operativa simple prevista en el SOP del equipo.",
         ]
 
     energias = _get_from_dict(computed, ["energias_seleccionadas", "energias"], {})
     lista_peligros = _get_from_dict(computed, ["lista_peligros_final", "peligros"], [])
     evaluaciones_fine = _get_from_dict(computed, ["evaluaciones_fine"], [])
 
+    # Código del borrador y fecha para Evaluación de riesgos
+    codigo_borrador = _get_from_dict(
+        payload,
+        ["codigo", "codigo_borrador", "id", "referencia"],
+        _get_from_dict(widgets, ["codigo", "codigo_borrador", "id", "referencia"], ""),
+    )
+    fecha_borrador = _get_from_dict(
+        payload,
+        ["fecha", "fecha_borrador", "fecha_evaluacion"],
+        _get_from_dict(widgets, ["fecha", "fecha_borrador", "fecha_evaluacion"], ""),
+    )
+
     sitio = _get_from_dict(widgets, ["sitio", "planta", "site"], "")
     negocio_json = _get_from_dict(widgets, ["negocio", "business", "unidad_negocio"], "")
-    codigo_borrador, fecha_borrador = _extract_borrador_reference(payload, widgets, computed)
 
     return {
         "negocio": _auto_negocio_from_sitio(sitio, negocio_json),
@@ -344,14 +307,12 @@ def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
         "anio": _get_from_dict(widgets, ["anio", "año"], ""),
         "modo_inicial": _get_from_dict(computed, ["modo_inicial"], _get_from_dict(widgets, ["modo_inicial"], "")),
         "modo_final": mode_final,
-        "codigo_borrador": codigo_borrador,
-        "fecha_borrador": fecha_borrador,
-        "evaluacion_riesgos": _format_evaluacion_riesgos(codigo_borrador, fecha_borrador),
         "tareas": tasks,
-        "tareas_manuales": tareas_manuales,
         "energias": energias,
         "lista_peligros": lista_peligros,
         "evaluaciones_fine": evaluaciones_fine,
+        "codigo_borrador": codigo_borrador,
+        "fecha_borrador": fecha_borrador,
         "photo_uri": "",
     }
 
@@ -374,6 +335,50 @@ def _equipment_meta(ctx: Dict[str, Any]) -> str:
     return " · ".join(meta)
 
 
+# Textos de Acción y Verificación Modo 1
+_ACCION_MODO1 = [
+    "1. Detener la máquina mediante el paro de operación normal definido para el equipo.",
+    "2. Esperar a que finalice el ciclo o que la máquina alcance una condición detenida y estable.",
+    "3. Confirmar visualmente que no existan movimientos peligrosos antes de abrir la guarda.",
+    "4. Abrir únicamente la guarda o puerta de acceso prevista para la intervención.",
+    "5. Permitir que el interlock de seguridad actúe y mantenga impedido el reinicio de la máquina mientras la guarda permanezca abierta.",
+    "6. Ingresar solo la parte del cuerpo estrictamente necesaria para realizar la intervención autorizada.",
+    "7. Realizar únicamente la tarea prevista: retirar botella atascada, destrabar elemento, acomodar producto, limpiar obstrucción menor o corregir una condición operativa simple.",
+    "8. Evitar introducir herramientas, partes del cuerpo o elementos adicionales que no estén contemplados en el procedimiento.",
+    "9. Mantener el cuerpo fuera de zonas de atrapamiento, corte, aplastamiento, punzonado, cizallamiento o movimiento residual.",
+    "10. No intervenir componentes asociados a energías peligrosas no controladas: neumática, hidráulica, eléctrica, térmica o mecánica acumulada.",
+    "11. Si durante la intervención se identifica energía peligrosa no controlada, suspender la tarea y escalar a Modo 3 / LOTO.",
+    "12. Retirar completamente manos, brazos, herramientas, producto suelto o cualquier elemento extraño del interior del equipo.",
+    "13. Cerrar completamente la guarda o puerta de acceso.",
+    "14. Verificar que la guarda quede correctamente cerrada, alineada y enclavada.",
+    "15. Reiniciar el sistema únicamente mediante el comando normal de arranque o reset operativo.",
+    "16. Observar el primer ciclo posterior al reinicio para confirmar que la condición anormal fue corregida.",
+    "17. Registrar la intervención si el SOP, el permiso de trabajo o el sistema de gestión lo exige.",
+]
+
+_VERIFICACION_MODO1 = [
+    "1. Verificar que el procedimiento corresponde a una tarea de Modo 1: intervención operativa rutinaria, breve, prevista, realizada a través de guardas enclavadas.",
+    "2. Verificar que la máquina fue detenida con el paro de operación normal, no con el paro de emergencia.",
+    "3. Verificar que el paro de emergencia no sea utilizado como método habitual de detención operativa.",
+    "4. Verificar que el paro de emergencia quede reservado exclusivamente para emergencias reales o riesgo inminente.",
+    "5. Verificar que las guardas, puertas o tapas de acceso cuenten con dispositivos de enclavamiento adecuados al riesgo.",
+    "6. Verificar que los interlocks sean dispositivos diseñados para impedir el arranque o reinicio inesperado con la guarda abierta.",
+    "7. Verificar que los dispositivos de seguridad estén instalados, operativos y en buen estado físico.",
+    "8. Verificar que los interlocks no estén puenteados, anulados, manipulados, vencidos, forzados ni desconectados.",
+    "9. Verificar que no existan imanes, llaves sueltas, sensores anulados, bypass eléctricos, amarras o trabas mecánicas que vulneren el sistema.",
+    "10. Verificar que la apertura de la guarda provoque la detención o inhibición segura de los movimientos peligrosos.",
+    "11. Verificar que la máquina no pueda reiniciar automáticamente al cerrar la guarda.",
+    "12. Verificar que el reinicio requiera una acción voluntaria e independiente del operador: reset y/o comando de arranque.",
+    "13. Verificar que no haya movimiento residual, presión acumulada, partes en caída libre o elementos con liberación inesperada.",
+    "14. Verificar que la intervención no requiera bloqueo, candado, purga o aislamiento de energías; si lo requiere, no debe tratarse como Modo 1.",
+    "15. Verificar que la tarea esté contemplada en el SOP, instructivo operativo, manual del fabricante o evaluación de riesgo aprobada.",
+    "16. Verificar que el operador esté capacitado y autorizado para realizar intervenciones de Modo 1.",
+    "17. Verificar que todas las personas estén fuera de la zona peligrosa antes de cerrar la guarda y reiniciar.",
+    "18. Verificar que no queden herramientas, botellas, fragmentos, piezas sueltas o residuos dentro del equipo.",
+    "19. Verificar que si el destrabe requiere retirar protecciones, ingresar más allá de lo permitido o controlar energías peligrosas, la tarea sea reclasificada como Modo 3 / LOTO.",
+]
+
+
 def build_modo_1_html(
     ctx: Dict[str, Any],
     *,
@@ -390,6 +395,8 @@ def build_modo_1_html(
     puesto_elaborado: str = "",
     puesto_aprobado: str = "",
     fecha_firma: "datetime.date | str | None" = None,
+    eval_riesgos_codigo: str = "",
+    eval_riesgos_fecha: str = "",
 ) -> str:
     fecha_txt = fecha.strftime("%d/%m/%Y") if isinstance(fecha, datetime.date) else _normalize(fecha)
     fecha_firma_txt = fecha_firma.strftime("%d/%m/%Y") if isinstance(fecha_firma, datetime.date) else (_normalize(fecha_firma) or fecha_txt)
@@ -409,12 +416,23 @@ def build_modo_1_html(
         else "<div class='photo-placeholder'>FOTO DEL PASO A PASO</div>"
     )
 
-    # LSR image block — shown only when the image is available
     lsr_block = (
         f"<img class='lsr-img' src='{lsr_uri}' alt='LSR'>"
         if lsr_uri
         else "<div class='lsr-placeholder'>LSR</div>"
     )
+
+    # Evaluación de riesgos text
+    eval_ref = ""
+    if eval_riesgos_codigo:
+        eval_ref += f"Código: {_html(eval_riesgos_codigo)}"
+    if eval_riesgos_fecha:
+        eval_ref += f"  ·  Fecha: {_html(eval_riesgos_fecha)}"
+    if not eval_ref:
+        eval_ref = "—"
+
+    accion_html = "".join(f"<p>{_html(line)}</p>" for line in _ACCION_MODO1)
+    verif_html = "".join(f"<p>{_html(line)}</p>" for line in _VERIFICACION_MODO1)
 
     html_doc = f"""
 <!doctype html>
@@ -544,7 +562,7 @@ def build_modo_1_html(
     .person-title {{
         font-weight: 900;
         text-align: center;
-        background: #00B0F0;
+        background: {MODO1_COLOR};
         color: #0F172A;
         font-size: 8.8px;
         padding: 3px 6px;
@@ -582,9 +600,21 @@ def build_modo_1_html(
         text-transform: none;
     }}
 
+    /* Barra de evaluación de riesgos */
+    .eval-bar {{
+        background: {MODO1_COLOR};
+        color: #0F172A;
+        font-weight: 800;
+        font-size: 8.5px;
+        padding: 3px 8px;
+        border-left: 1px solid #111827;
+        border-right: 1px solid #111827;
+        border-bottom: 1px solid #111827;
+    }}
+
     .red-header th,
     .red-bar {{
-        background: #00B0F0;
+        background: {MODO1_COLOR};
         color: #0F172A;
         font-weight: 900;
         text-align: center;
@@ -598,7 +628,7 @@ def build_modo_1_html(
         text-transform: none;
     }}
 
-    .block-zero {{
+    .block-one {{
         text-align: center;
         font-size: 48px;
         font-weight: 900;
@@ -608,7 +638,7 @@ def build_modo_1_html(
     }}
 
     .mode-box {{
-        background: #00B0F0;
+        background: {MODO1_COLOR};
         color: #0F172A;
         text-align: center;
         font-size: 17px;
@@ -657,7 +687,6 @@ def build_modo_1_html(
         background: #F8FAFC;
     }}
 
-    /* ── Tabla de procedimiento: solo Acción y Verificación ── */
     .dark-head th {{
         background: #3B3B3B;
         color: #FFFFFF;
@@ -681,7 +710,7 @@ def build_modo_1_html(
     }}
 
     .procedure-note p {{
-        margin: 0 0 5px 0;
+        margin: 0 0 4px 0;
     }}
 
     .procedure-note p:last-child {{
@@ -689,7 +718,7 @@ def build_modo_1_html(
     }}
 
     .legend-title {{
-        background: #00B0F0;
+        background: {MODO1_COLOR};
         color: #0F172A;
         font-weight: 900;
         text-align: center;
@@ -752,7 +781,6 @@ def build_modo_1_html(
         overflow: hidden;
     }}
 
-    /* ── LSR ── */
     .lsr-section {{
         border-left: 1px solid #111827;
         border-right: 1px solid #111827;
@@ -781,7 +809,6 @@ def build_modo_1_html(
         background: #F8FAFC;
     }}
 
-    /* ── Firmas ── */
     .footer-sign {{
         margin-top: 0;
     }}
@@ -870,12 +897,9 @@ def build_modo_1_html(
     </table>
 
     <!-- EVALUACIÓN DE RIESGOS -->
-    <table>
-        <tr>
-            <td class="equipment-label">Evaluación de riesgos:</td>
-            <td class="person-body" style="text-align:left; padding:5px 8px;">{_html(ctx.get('evaluacion_riesgos') or _format_evaluacion_riesgos(ctx.get('codigo_borrador'), ctx.get('fecha_borrador')))}</td>
-        </tr>
-    </table>
+    <div class="eval-bar">
+        <strong>Evaluación de riesgos de referencia:</strong>&nbsp;&nbsp;{eval_ref}
+    </div>
 
     <!-- TAREAS -->
     <table>
@@ -885,7 +909,7 @@ def build_modo_1_html(
             <th>Listado de tareas aplicable al presente procedimiento</th>
         </tr>
         <tr>
-            <td class="block-zero">0</td>
+            <td class="block-one">1</td>
             <td class="mode-box">MODO 1</td>
             <td class="tasks-cell">{task_rows}</td>
         </tr>
@@ -901,59 +925,15 @@ def build_modo_1_html(
         </tr>
     </table>
 
-    <!-- PROCEDIMIENTO: solo Acción y Verificación (50/50) -->
+    <!-- PROCEDIMIENTO: Acción y Verificación -->
     <table class="procedure-table">
         <tr class="dark-head">
             <th style="width: 50%;">Acción</th>
             <th style="width: 50%;">Verificación</th>
         </tr>
         <tr>
-            <td class="procedure-note">
-                <p>1. Detener la máquina mediante el paro de operación normal definido para el equipo.</p>
-                <p>2. Esperar a que finalice el ciclo o que la máquina alcance una condición detenida y estable.</p>
-                <p>3. Confirmar visualmente que no existan movimientos peligrosos antes de abrir la guarda.</p>
-                <p>4. Abrir únicamente la guarda o puerta de acceso prevista para la intervención.</p>
-                <p>5. Permitir que el interlock de seguridad actúe y mantenga impedido el reinicio de la máquina mientras la guarda permanezca abierta.</p>
-                <p>6. Ingresar solo la parte del cuerpo estrictamente necesaria para realizar la intervención autorizada.</p>
-                <p>7. Realizar únicamente la tarea prevista, por ejemplo: retirar botella atascada, destrabar elemento, acomodar producto, limpiar obstrucción menor o corregir una condición operativa simple.</p>
-                <p>8. Evitar introducir herramientas, partes del cuerpo o elementos adicionales que no estén contemplados en el procedimiento.</p>
-                <p>9. Mantener el cuerpo fuera de zonas de atrapamiento, corte, aplastamiento, punzonado, cizallamiento o movimiento residual.</p>
-                <p>10. No intervenir componentes que puedan estar asociados a energías peligrosas no controladas, como neumática, hidráulica, eléctrica, térmica o mecánica acumulada.</p>
-                <p>11. Si durante la intervención se identifica energía peligrosa no controlada, suspender la tarea y escalar a Modo 3 / LOTO, según corresponda.</p>
-                <p>12. Retirar completamente manos, brazos, herramientas, producto suelto o cualquier elemento extraño del interior del equipo.</p>
-                <p>13. Cerrar completamente la guarda o puerta de acceso.</p>
-                <p>14. Verificar que la guarda quede correctamente cerrada, alineada y enclavada.</p>
-                <p>15. Reiniciar el sistema únicamente mediante el comando normal de arranque o reset operativo, según el procedimiento del equipo.</p>
-                <p>16. Observar el primer ciclo posterior al reinicio para confirmar que la condición anormal fue corregida.</p>
-                <p>17. Registrar la intervención si el SOP, el permiso de trabajo o el sistema de gestión lo exige.</p>
-            </td>
-            <td class="procedure-note">
-                <p>1. Verificar que el procedimiento corresponde efectivamente a una tarea de Modo 1, es decir, una intervención operativa rutinaria, breve, prevista y realizada a través de guardas enclavadas.</p>
-                <p>2. Verificar que la máquina fue detenida con el paro de operación normal, no con el paro de emergencia.</p>
-                <p>3. Verificar que el paro de emergencia no sea utilizado como método habitual de detención operativa.</p>
-                <p>4. Verificar que el paro de emergencia quede reservado exclusivamente para situaciones de emergencia real o riesgo inminente.</p>
-                <p>5. Verificar que las guardas, puertas o tapas de acceso cuenten con dispositivos de enclavamiento de seguridad adecuados al riesgo.</p>
-                <p>6. Verificar que los interlocks sean dispositivos de seguridad diseñados para impedir el arranque o reinicio inesperado con la guarda abierta.</p>
-                <p>7. Verificar que los dispositivos de seguridad estén instalados, operativos y en buen estado físico.</p>
-                <p>8. Verificar que los interlocks no estén puenteados, anulados, manipulados, vencidos, forzados ni desconectados.</p>
-                <p>9. Verificar que no existan imanes, llaves sueltas, sensores anulados, bypass eléctricos, amarras, trabas mecánicas o cualquier otro medio de vulneración del sistema de seguridad.</p>
-                <p>10. Verificar que la apertura de la guarda provoque la detención o inhibición segura de los movimientos peligrosos conforme al diseño del equipo.</p>
-                <p>11. Verificar que la máquina no pueda reiniciar automáticamente al cerrar la guarda.</p>
-                <p>12. Verificar que el reinicio requiera una acción voluntaria e independiente del operador, como reset y/o comando de arranque.</p>
-                <p>13. Verificar que las condiciones de seguridad de la máquina estén dadas antes de intervenir.</p>
-                <p>14. Verificar que no haya movimiento residual, presión acumulada, partes en caída libre, producto inestable o elementos con posibilidad de liberación inesperada.</p>
-                <p>15. Verificar que la intervención no requiera bloqueo, candado, purga o aislamiento de energías peligrosas; si lo requiere, no debe tratarse como Modo 1.</p>
-                <p>16. Verificar que no exista exposición a energía neumática, hidráulica, eléctrica, térmica o mecánica acumulada que pueda generar daño durante la intervención.</p>
-                <p>17. Verificar que la tarea esté contemplada en el SOP, instructivo operativo, manual del fabricante o evaluación de riesgo aprobada.</p>
-                <p>18. Verificar que el operador esté capacitado y autorizado para realizar intervenciones de Modo 1.</p>
-                <p>19. Verificar que la zona de intervención esté visible, accesible y libre de obstáculos.</p>
-                <p>20. Verificar que el área esté en condiciones de orden y limpieza antes del reinicio.</p>
-                <p>21. Verificar que todas las personas estén fuera de la zona peligrosa antes de cerrar la guarda y reiniciar.</p>
-                <p>22. Verificar que no queden herramientas, botellas, fragmentos, piezas sueltas o residuos dentro del equipo.</p>
-                <p>23. Verificar que la guarda cierre correctamente y que el indicador de seguridad, si existe, confirme condición segura.</p>
-                <p>24. Verificar que cualquier falla, repetición del atasco, anomalía o necesidad de ingreso más profundo sea reportada y evaluada antes de continuar.</p>
-                <p>25. Verificar que, si el destrabe requiere retirar protecciones, ingresar más allá de lo permitido o controlar energías peligrosas, la tarea sea reclasificada como Modo 3 / LOTO.</p>
-            </td>
+            <td class="procedure-note">{accion_html}</td>
+            <td class="procedure-note">{verif_html}</td>
         </tr>
     </table>
 
@@ -1050,10 +1030,7 @@ def html_to_pdf_bytes(html_doc: str) -> bytes:
             browser.close()
             return pdf_bytes
     except Exception as exc:
-        raise RuntimeError(
-            "No se pudo generar el PDF con Playwright. "
-            f"Detalle: {exc}"
-        ) from exc
+        raise RuntimeError(f"No se pudo generar el PDF con Playwright. Detalle: {exc}") from exc
 
 
 # ============================================================
@@ -1210,6 +1187,8 @@ def html_to_word_bytes(
     puesto_elaborado: str = "",
     puesto_aprobado: str = "",
     fecha_firma: "datetime.date | str | None" = None,
+    eval_riesgos_codigo: str = "",
+    eval_riesgos_fecha: str = "",
 ) -> bytes:
     from docx import Document
     from docx.enum.section import WD_SECTION_START
@@ -1259,7 +1238,7 @@ def html_to_word_bytes(
         _docx_write_cell(header.cell(row_idx, 3), label, bold=True, size=7.5, fill="E5E7EB")
         _docx_write_cell(header.cell(row_idx, 4), value, bold=True, size=7.5, fill="F8FAFC")
 
-    # Info sitio + personal — label normal, valor en negrita
+    # Info sitio + personal
     info = document.add_table(rows=1, cols=5)
     _docx_apply_table_grid(info, [2.0, 2.8, 2.8, 3.6, 6.6])
     for idx, (label, value) in enumerate(
@@ -1278,13 +1257,11 @@ def html_to_word_bytes(
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         para.paragraph_format.space_before = 0
         para.paragraph_format.space_after = 0
-        # Línea 1: etiqueta (normal)
         run_label = para.add_run(label + "\n")
         run_label.bold = False
         run_label.font.name = "Bahnschrift"
         run_label.font.size = __import__("docx.shared", fromlist=["Pt"]).Pt(7.2)
         run_label.font.color.rgb = __import__("docx.shared", fromlist=["RGBColor"]).RGBColor.from_string("334155")
-        # Línea 2: valor (negrita)
         run_val = para.add_run(str(value))
         run_val.bold = True
         run_val.font.name = "Bahnschrift"
@@ -1294,15 +1271,14 @@ def html_to_word_bytes(
     _docx_clear_cell(person_cell)
     _docx_set_cell_borders(person_cell)
     _docx_set_cell_margins(person_cell, top=0, start=0, bottom=0, end=0)
-    # Eliminar el párrafo vacío que queda al limpiar la celda
     from docx.oxml.ns import qn as _qn
     for p_elem in person_cell._tc.findall(_qn("w:p")):
         person_cell._tc.remove(p_elem)
     nested = person_cell.add_table(rows=4, cols=1)
     _docx_apply_table_grid(nested, [6.4])
-    _docx_write_cell(nested.cell(0, 0), "Personal afectado - Puestos de trabajo", bold=True, size=6.8, fill="00B0F0")
+    _docx_write_cell(nested.cell(0, 0), "Personal afectado - Puestos de trabajo", bold=True, size=6.8, fill=MODO1_COLOR_HEX)
     _docx_write_cell(nested.cell(1, 0), personal_afectado, size=6.8, fill="FFFFFF")
-    _docx_write_cell(nested.cell(2, 0), "Personal autorizado - Puestos de trabajo", bold=True, size=6.8, fill="00B0F0")
+    _docx_write_cell(nested.cell(2, 0), "Personal autorizado - Puestos de trabajo", bold=True, size=6.8, fill=MODO1_COLOR_HEX)
     _docx_write_cell(nested.cell(3, 0), personal_autorizado, size=6.8, fill="FFFFFF")
 
     # Equipo
@@ -1312,31 +1288,31 @@ def html_to_word_bytes(
     _docx_write_cell(equipment.cell(0, 1), f"{_upper(ctx.get('equipo') or 'EQUIPO')}\n{equipo_meta}", bold=True, size=9.0, fill="FFFFFF")
 
     # Evaluación de riesgos
-    risk_table = document.add_table(rows=1, cols=2)
-    _docx_apply_table_grid(risk_table, [3.4, 14.4])
-    _docx_write_cell(risk_table.cell(0, 0), "Evaluación de riesgos:", bold=True, size=7.0, fill="F8FAFC")
-    _docx_write_cell(
-        risk_table.cell(0, 1),
-        ctx.get("evaluacion_riesgos") or _format_evaluacion_riesgos(ctx.get("codigo_borrador"), ctx.get("fecha_borrador")),
-        size=6.8,
-        fill="FFFFFF",
-        align="left",
-    )
+    eval_bar = document.add_table(rows=1, cols=1)
+    _docx_apply_table_grid(eval_bar, [17.8])
+    eval_ref_txt = "Evaluación de riesgos de referencia:  "
+    if eval_riesgos_codigo:
+        eval_ref_txt += f"Código: {eval_riesgos_codigo}"
+    if eval_riesgos_fecha:
+        eval_ref_txt += f"  ·  Fecha: {eval_riesgos_fecha}"
+    if eval_ref_txt.strip().endswith(":"):
+        eval_ref_txt += " —"
+    _docx_write_cell(eval_bar.cell(0, 0), eval_ref_txt, bold=True, size=7.0, fill=MODO1_COLOR_HEX, align="left")
 
     # Tareas
     tasks_table = document.add_table(rows=2, cols=3)
     _docx_apply_table_grid(tasks_table, [2.0, 2.8, 13.0])
     for idx, title in enumerate(["Puntos de\nBloqueo", "Modo de\nIntervención", "Listado de tareas aplicable al presente procedimiento"]):
-        _docx_write_cell(tasks_table.cell(0, idx), title, bold=True, size=7.2, fill="00B0F0")
-    _docx_write_cell(tasks_table.cell(1, 0), "0", bold=True, size=32.0, fill="FFFFFF")
-    _docx_write_cell(tasks_table.cell(1, 1), "MODO 1", bold=True, size=13.0, fill="00B0F0")
+        _docx_write_cell(tasks_table.cell(0, idx), title, bold=True, size=7.2, fill=MODO1_COLOR_HEX)
+    _docx_write_cell(tasks_table.cell(1, 0), "1", bold=True, size=32.0, fill="FFFFFF")
+    _docx_write_cell(tasks_table.cell(1, 1), "MODO 1", bold=True, size=13.0, fill=MODO1_COLOR_HEX)
     tasks_text = "\n".join(f"- {task}" for task in (ctx.get("tareas") or []))
     _docx_write_cell(tasks_table.cell(1, 2), tasks_text, size=6.8, fill="FFFFFF", align="left")
 
     # Barra
     bar = document.add_table(rows=1, cols=1)
     _docx_apply_table_grid(bar, [17.8])
-    _docx_write_cell(bar.cell(0, 0), "Procedimiento - Control de Energías Peligrosas", bold=True, size=7.6, fill="00B0F0")
+    _docx_write_cell(bar.cell(0, 0), "Procedimiento - Control de Energías Peligrosas", bold=True, size=7.6, fill=MODO1_COLOR_HEX)
 
     # Foto
     photo_table = document.add_table(rows=1, cols=1)
@@ -1354,83 +1330,27 @@ def html_to_word_bytes(
         except Exception:
             _docx_write_cell(photo_cell, "FOTO DEL PASO A PASO", bold=True, size=11.0, color="94A3B8", fill="FFFFFF")
 
-    # Procedimiento: solo Acción y Verificación
+    # Procedimiento: Acción y Verificación
     proc = document.add_table(rows=2, cols=2)
     _docx_apply_table_grid(proc, [8.9, 8.9])
     _docx_write_cell(proc.cell(0, 0), "Acción", bold=True, size=7.0, color="FFFFFF", fill="3B3B3B")
     _docx_write_cell(proc.cell(0, 1), "Verificación", bold=True, size=7.0, color="FFFFFF", fill="3B3B3B")
-    accion = (
-        '1. Detener la máquina mediante el paro de operación normal definido para el equipo.\\n\\n'
-        '2. Esperar a que finalice el ciclo o que la máquina alcance una condición detenida y estable.\\n\\n'
-        '3. Confirmar visualmente que no existan movimientos peligrosos antes de abrir la guarda.\\n\\n'
-        '4. Abrir únicamente la guarda o puerta de acceso prevista para la intervención.\\n\\n'
-        '5. Permitir que el interlock de seguridad actúe y mantenga impedido el reinicio de la máquina mientras la guarda permanezca abierta.\\n\\n'
-        '6. Ingresar solo la parte del cuerpo estrictamente necesaria para realizar la intervención autorizada.\\n\\n'
-        '7. Realizar únicamente la tarea prevista, por ejemplo: retirar botella atascada, destrabar elemento, acomodar producto, limpiar obstrucción menor o corregir una condición operativa simple.\\n\\n'
-        '8. Evitar introducir herramientas, partes del cuerpo o elementos adicionales que no estén contemplados en el procedimiento.\\n\\n'
-        '9. Mantener el cuerpo fuera de zonas de atrapamiento, corte, aplastamiento, punzonado, cizallamiento o movimiento residual.\\n\\n'
-        '10. No intervenir componentes que puedan estar asociados a energías peligrosas no controladas, como neumática, hidráulica, eléctrica, térmica o mecánica acumulada.\\n\\n'
-        '11. Si durante la intervención se identifica energía peligrosa no controlada, suspender la tarea y escalar a Modo 3 / LOTO, según corresponda.\\n\\n'
-        '12. Retirar completamente manos, brazos, herramientas, producto suelto o cualquier elemento extraño del interior del equipo.\\n\\n'
-        '13. Cerrar completamente la guarda o puerta de acceso.\\n\\n'
-        '14. Verificar que la guarda quede correctamente cerrada, alineada y enclavada.\\n\\n'
-        '15. Reiniciar el sistema únicamente mediante el comando normal de arranque o reset operativo, según el procedimiento del equipo.\\n\\n'
-        '16. Observar el primer ciclo posterior al reinicio para confirmar que la condición anormal fue corregida.\\n\\n'
-        '17. Registrar la intervención si el SOP, el permiso de trabajo o el sistema de gestión lo exige.'
-    )
-    verificacion = (
-        '1. Verificar que el procedimiento corresponde efectivamente a una tarea de Modo 1, es decir, una intervención operativa rutinaria, breve, prevista y realizada a través de guardas enclavadas.\\n\\n'
-        '2. Verificar que la máquina fue detenida con el paro de operación normal, no con el paro de emergencia.\\n\\n'
-        '3. Verificar que el paro de emergencia no sea utilizado como método habitual de detención operativa.\\n\\n'
-        '4. Verificar que el paro de emergencia quede reservado exclusivamente para situaciones de emergencia real o riesgo inminente.\\n\\n'
-        '5. Verificar que las guardas, puertas o tapas de acceso cuenten con dispositivos de enclavamiento de seguridad adecuados al riesgo.\\n\\n'
-        '6. Verificar que los interlocks sean dispositivos de seguridad diseñados para impedir el arranque o reinicio inesperado con la guarda abierta.\\n\\n'
-        '7. Verificar que los dispositivos de seguridad estén instalados, operativos y en buen estado físico.\\n\\n'
-        '8. Verificar que los interlocks no estén puenteados, anulados, manipulados, vencidos, forzados ni desconectados.\\n\\n'
-        '9. Verificar que no existan imanes, llaves sueltas, sensores anulados, bypass eléctricos, amarras, trabas mecánicas o cualquier otro medio de vulneración del sistema de seguridad.\\n\\n'
-        '10. Verificar que la apertura de la guarda provoque la detención o inhibición segura de los movimientos peligrosos conforme al diseño del equipo.\\n\\n'
-        '11. Verificar que la máquina no pueda reiniciar automáticamente al cerrar la guarda.\\n\\n'
-        '12. Verificar que el reinicio requiera una acción voluntaria e independiente del operador, como reset y/o comando de arranque.\\n\\n'
-        '13. Verificar que las condiciones de seguridad de la máquina estén dadas antes de intervenir.\\n\\n'
-        '14. Verificar que no haya movimiento residual, presión acumulada, partes en caída libre, producto inestable o elementos con posibilidad de liberación inesperada.\\n\\n'
-        '15. Verificar que la intervención no requiera bloqueo, candado, purga o aislamiento de energías peligrosas; si lo requiere, no debe tratarse como Modo 1.\\n\\n'
-        '16. Verificar que no exista exposición a energía neumática, hidráulica, eléctrica, térmica o mecánica acumulada que pueda generar daño durante la intervención.\\n\\n'
-        '17. Verificar que la tarea esté contemplada en el SOP, instructivo operativo, manual del fabricante o evaluación de riesgo aprobada.\\n\\n'
-        '18. Verificar que el operador esté capacitado y autorizado para realizar intervenciones de Modo 1.\\n\\n'
-        '19. Verificar que la zona de intervención esté visible, accesible y libre de obstáculos.\\n\\n'
-        '20. Verificar que el área esté en condiciones de orden y limpieza antes del reinicio.\\n\\n'
-        '21. Verificar que todas las personas estén fuera de la zona peligrosa antes de cerrar la guarda y reiniciar.\\n\\n'
-        '22. Verificar que no queden herramientas, botellas, fragmentos, piezas sueltas o residuos dentro del equipo.\\n\\n'
-        '23. Verificar que la guarda cierre correctamente y que el indicador de seguridad, si existe, confirme condición segura.\\n\\n'
-        '24. Verificar que cualquier falla, repetición del atasco, anomalía o necesidad de ingreso más profundo sea reportada y evaluada antes de continuar.\\n\\n'
-        '25. Verificar que, si el destrabe requiere retirar protecciones, ingresar más allá de lo permitido o controlar energías peligrosas, la tarea sea reclasificada como Modo 3 / LOTO.'
-    )
-    _docx_write_cell(proc.cell(1, 0), accion, size=7.2, fill="FFFFFF", align="left", valign="top")
-    _docx_write_cell(proc.cell(1, 1), verificacion, size=7.2, fill="FFFFFF", align="left", valign="top")
+    accion_txt = "\n\n".join(_ACCION_MODO1)
+    verif_txt = "\n\n".join(_VERIFICACION_MODO1)
+    _docx_write_cell(proc.cell(1, 0), accion_txt, size=6.5, fill="FFFFFF", align="left", valign="top")
+    _docx_write_cell(proc.cell(1, 1), verif_txt, size=6.5, fill="FFFFFF", align="left", valign="top")
 
-    # Leyenda energías — franjas verticales precisas mediante PNG embebido en celda
+    # Leyenda energías
     legend_title = document.add_table(rows=1, cols=1)
     _docx_apply_table_grid(legend_title, [17.8])
-    _docx_write_cell(legend_title.cell(0, 0), "Clasificación de Energías Peligrosas", bold=True, size=7.0, fill="00B0F0")
+    _docx_write_cell(legend_title.cell(0, 0), "Clasificación de Energías Peligrosas", bold=True, size=7.0, fill=MODO1_COLOR_HEX)
     energy = document.add_table(rows=2, cols=6)
     _docx_apply_table_grid(energy, [17.8 / 6] * 6)
 
-    def _make_stripe_png_exact(
-        bg: str,
-        stripe_color: str,
-        stripe_positions: "list[tuple[int,int]]",
-        width: int = 120,
-        height: int = 30,
-    ) -> bytes:
-        """
-        Genera PNG con fondo `bg` y franjas verticales de color `stripe_color`.
-        stripe_positions: lista de (x_start_pct, x_end_pct) en porcentaje del ancho.
-        Ejemplo: [(20,30),(50,60),(75,85)] → 3 franjas.
-        """
+    def _make_stripe_png_exact(bg, stripe_color, stripe_positions, width=120, height=30):
         try:
             from PIL import Image as _PIL, ImageDraw as _Draw
-            img = _PIL.new("RGB", (width, height),
-                           tuple(int(bg[i:i+2], 16) for i in (0, 2, 4)))
+            img = _PIL.new("RGB", (width, height), tuple(int(bg[i:i+2], 16) for i in (0, 2, 4)))
             draw = _Draw.Draw(img)
             sc = tuple(int(stripe_color[i:i+2], 16) for i in (0, 2, 4))
             for x0_pct, x1_pct in stripe_positions:
@@ -1443,31 +1363,17 @@ def html_to_word_bytes(
         except Exception:
             return b""
 
-    def _docx_energy_stripe_cell(
-        cell,
-        label: str,
-        font_color: str,
-        png_bytes: bytes,
-        cell_width_cm: float,
-        cell_height_cm: float = 0.7,
-    ) -> None:
-        """
-        Imagen de franjas como fondo real (wp:anchor behindDoc=1) con texto encima.
-        La imagen ocupa exactamente el ancho × alto de la celda.
-        """
+    def _docx_energy_stripe_cell(cell, label, font_color, png_bytes, cell_width_cm, cell_height_cm=0.7):
         from lxml import etree as _etree
         from docx.oxml import OxmlElement as _OE
         from docx.oxml.ns import qn as _qn
         from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
         from docx.enum.text import WD_ALIGN_PARAGRAPH
-
         if not png_bytes:
             _docx_write_cell(cell, label, bold=True, size=5.8, color=font_color, fill="D9D9D9")
             return
-
         cell.text = ""
         tc_pr = cell._tc.get_or_add_tcPr()
-        # Bordes
         tc_b = tc_pr.first_child_found_in("w:tcBorders")
         if tc_b is None:
             tc_b = _OE("w:tcBorders"); tc_pr.append(tc_b)
@@ -1476,7 +1382,6 @@ def html_to_word_bytes(
             s.set(_qn("w:val"), "single"); s.set(_qn("w:sz"), "6")
             s.set(_qn("w:space"), "0"); s.set(_qn("w:color"), "111827")
             tc_b.append(s)
-        # Márgenes cero
         tc_m = tc_pr.first_child_found_in("w:tcMar")
         if tc_m is None:
             tc_m = _OE("w:tcMar"); tc_pr.append(tc_m)
@@ -1484,17 +1389,11 @@ def html_to_word_bytes(
             n = _OE(f"w:{m}"); n.set(_qn("w:w"), "0"); n.set(_qn("w:type"), "dxa")
             tc_m.append(n)
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-
-        # Registrar imagen en el part del documento
         rId, _ = cell.part.get_or_add_image(io.BytesIO(png_bytes))
-
-        # EMU: 1 pulgada = 914400, 1 cm = 914400/2.54
-        cx = int(cell_width_cm  * 914400 / 2.54)
+        cx = int(cell_width_cm * 914400 / 2.54)
         cy = int(cell_height_cm * 914400 / 2.54)
-
         anchor_xml = (
-            f'<w:drawing'
-            f' xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+            f'<w:drawing xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
             f' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
             f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
             f' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
@@ -1513,98 +1412,63 @@ def html_to_word_bytes(
             f'<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
             f'<pic:pic>'
             f'<pic:nvPicPr><pic:cNvPr id="10" name="bg"/><pic:cNvPicPr/></pic:nvPicPr>'
-            f'<pic:blipFill>'
-            f'<a:blip r:embed="{rId}"/>'
-            f'<a:stretch><a:fillRect/></a:stretch>'
-            f'</pic:blipFill>'
-            f'<pic:spPr>'
-            f'<a:xfrm><a:off x="0" y="0"/>'
-            f'<a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
-            f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-            f'</pic:spPr>'
-            f'</pic:pic>'
-            f'</a:graphicData>'
-            f'</a:graphic>'
-            f'</wp:anchor>'
-            f'</w:drawing>'
+            f'<pic:blipFill><a:blip r:embed="{rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
+            f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+            f'</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing>'
         )
-
         para = cell.paragraphs[0]
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         para.paragraph_format.space_before = 0
         para.paragraph_format.space_after = 0
-
-        # Run 0: anchor flotante detrás del texto
         drawing_el = _etree.fromstring(anchor_xml.encode())
-        r0 = _OE("w:r")
-        r0.append(drawing_el)
-        para._p.append(r0)
-
-        # Run 1: etiqueta de texto encima
+        r0 = _OE("w:r"); r0.append(drawing_el); para._p.append(r0)
         r1 = _OE("w:r")
         rPr = _OE("w:rPr")
         fc = font_color.replace("#", "").upper()
         for tag, attrs in [
             ("w:b", {}),
             ("w:rFonts", {_qn("w:ascii"): "Bahnschrift", _qn("w:hAnsi"): "Bahnschrift"}),
-            ("w:sz",   {_qn("w:val"): "12"}),
+            ("w:sz", {_qn("w:val"): "12"}),
             ("w:szCs", {_qn("w:val"): "12"}),
             ("w:color", {_qn("w:val"): fc}),
         ]:
             e = _OE(tag)
-            for k, v in attrs.items():
-                e.set(k, v)
+            for k, v in attrs.items(): e.set(k, v)
             rPr.append(e)
         r1.append(rPr)
-        t_el = _OE("w:t"); t_el.text = label
-        r1.append(t_el)
+        t_el = _OE("w:t"); t_el.text = label; r1.append(t_el)
         para._p.append(r1)
 
-    # Definición de cada energía:
-    # (row, col, label, fill_sólido, font_color, stripe_spec)
-    # stripe_spec = None  →  celda sólida
-    # stripe_spec = (bg_hex, stripe_hex, [(x0_pct, x1_pct), ...])  →  PNG con franjas
     _CELL_W_CM = 17.8 / 6
     _CELL_H_CM = 0.65
-
     energy_items = [
-        # row col  label               fill      fcolor   stripe_spec
         (0, 0, "E: Eléctrica",    "000000", "FFFFFF", None),
         (0, 1, "N: Neumática",    "0284C7", "FFFFFF", None),
-        # AM: fondo gris, 3 franjas naranjas ~20% ancho cada una, espaciadas
-        (0, 2, "AM: Amoníaco",    "D9D9D9", "0F172A",
-         ("D9D9D9", "F59E0B", [(15, 26), (42, 53), (68, 79)])),
+        (0, 2, "AM: Amoníaco",    "D9D9D9", "0F172A", ("D9D9D9", "F59E0B", [(15, 26), (42, 53), (68, 79)])),
         (0, 3, "T: Térmica",      "DC2626", "FFFFFF", None),
         (0, 4, "H: Hidráulica",   "7C3AED", "FFFFFF", None),
-        # P: fondo amarillo, 2 franjas negras — texto gris para contraste sobre negro
-        (0, 5, "P: Potencial",    "FFF200", "555555",
-         ("FFF200", "050505", [(22, 34), (62, 74)])),
+        (0, 5, "P: Potencial",    "FFF200", "555555", ("FFF200", "050505", [(22, 34), (62, 74)])),
         (1, 0, "Q: Química",      "FFF200", "0F172A", None),
         (1, 1, "V: Vapor",        "F59E0B", "111827", None),
         (1, 2, "A: Agua",         "16A34A", "FFFFFF", None),
-        # SC: fondo gris, 2 franjas naranjas
-        (1, 3, "SC: Soda Cáustica","D9D9D9","0F172A",
-         ("D9D9D9", "F59E0B", [(25, 37), (60, 72)])),
+        (1, 3, "SC: Soda Cáustica","D9D9D9","0F172A", ("D9D9D9", "F59E0B", [(25, 37), (60, 72)])),
         (1, 4, "Oz: Ozono",       "BAE6FD", "0F172A", None),
         (1, 5, "GC: Gas Carbónico","C7D2FE","111827", None),
     ]
-
     for row, col, label, fill, font_color, stripe_spec in energy_items:
         cell = energy.cell(row, col)
         if stripe_spec:
             bg, sc, positions = stripe_spec
-            png = _make_stripe_png_exact(bg, sc, positions,
-                                         width=120, height=30)
-            _docx_energy_stripe_cell(cell, label, font_color, png,
-                                      _CELL_W_CM, _CELL_H_CM)
+            png = _make_stripe_png_exact(bg, sc, positions, width=120, height=30)
+            _docx_energy_stripe_cell(cell, label, font_color, png, _CELL_W_CM, _CELL_H_CM)
         else:
-            _docx_write_cell(cell, label, bold=True, size=5.8,
-                             color=font_color, fill=fill)
+            _docx_write_cell(cell, label, bold=True, size=5.8, color=font_color, fill=fill)
 
     # Leyenda candados
     lock_title = document.add_table(rows=1, cols=1)
     _docx_apply_table_grid(lock_title, [17.8])
-    _docx_write_cell(lock_title.cell(0, 0), "Clasificación de Candados según sector y función", bold=True, size=7.0, fill="00B0F0")
+    _docx_write_cell(lock_title.cell(0, 0), "Clasificación de Candados según sector y función", bold=True, size=7.0, fill=MODO1_COLOR_HEX)
     locks = document.add_table(rows=1, cols=5)
     _docx_apply_table_grid(locks, [17.8 / 5] * 5)
     lock_items = [
@@ -1617,7 +1481,7 @@ def html_to_word_bytes(
     for idx, (label, fill, font_color) in enumerate(lock_items):
         _docx_write_cell(locks.cell(0, idx), label, bold=True, size=5.8, color=font_color, fill=fill)
 
-    # Imagen LSR
+    # LSR
     lsr_table = document.add_table(rows=1, cols=1)
     _docx_apply_table_grid(lsr_table, [17.8])
     lsr_cell = lsr_table.cell(0, 0)
@@ -1652,7 +1516,7 @@ def html_to_word_bytes(
 # EXPORTACIÓN EXCEL
 # ============================================================
 
-def _xlsx_style_range(ws, cell_range: str, fill: "str | None" = None, font_color: str = "0F172A", bold: bool = False, size: float = 8.0, align: str = "center") -> None:
+def _xlsx_style_range(ws, cell_range, fill=None, font_color="0F172A", bold=False, size=8.0, align="center"):
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     side = Side(style="thin", color="111827")
     border = Border(left=side, right=side, top=side, bottom=side)
@@ -1664,13 +1528,13 @@ def _xlsx_style_range(ws, cell_range: str, fill: "str | None" = None, font_color
             if fill:
                 cell.fill = PatternFill("solid", fgColor=fill.replace("#", ""))
 
-def _xlsx_merge_write(ws, cell_range: str, value: Any, *, fill: "str | None" = None, font_color: str = "0F172A", bold: bool = False, size: float = 8.0, align: str = "center") -> None:
+def _xlsx_merge_write(ws, cell_range, value, *, fill=None, font_color="0F172A", bold=False, size=8.0, align="center"):
     top_left = cell_range.split(":", 1)[0]
     ws.merge_cells(cell_range)
     ws[top_left] = value
     _xlsx_style_range(ws, cell_range, fill=fill, font_color=font_color, bold=bold, size=size, align=align)
 
-def _xlsx_add_image(ws, data_uri: str, anchor: str, *, max_width_px: int, max_height_px: int) -> None:
+def _xlsx_add_image(ws, data_uri, anchor, *, max_width_px, max_height_px):
     if not data_uri:
         return
     try:
@@ -1690,18 +1554,6 @@ def _xlsx_add_image(ws, data_uri: str, anchor: str, *, max_width_px: int, max_he
     except Exception:
         return
 
-def _xlsx_energy_block(ws, row: int, start_col: int, label: str, fills: "list[str]", font_color: str = "0F172A") -> None:
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    side = Side(style="thin", color="111827")
-    border = Border(left=side, right=side, top=side, bottom=side)
-    for offset, fill in enumerate(fills):
-        cell = ws.cell(row=row, column=start_col + offset)
-        cell.fill = PatternFill("solid", fgColor=fill)
-        cell.border = border
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.font = Font(name="Bahnschrift", size=7, bold=True, color=font_color)
-    ws.cell(row=row, column=start_col).value = label
-
 def build_modo_1_excel_bytes(
     ctx: Dict[str, Any],
     *,
@@ -1718,6 +1570,8 @@ def build_modo_1_excel_bytes(
     puesto_elaborado: str = "",
     puesto_aprobado: str = "",
     fecha_firma: "datetime.date | str | None" = None,
+    eval_riesgos_codigo: str = "",
+    eval_riesgos_fecha: str = "",
 ) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -1745,11 +1599,11 @@ def build_modo_1_excel_bytes(
 
     for col in range(1, 25):
         ws.column_dimensions[get_column_letter(col)].width = 4.2
-    for row in range(1, 56):
+    for row in range(1, 58):
         ws.row_dimensions[row].height = 18
 
     white = PatternFill("solid", fgColor="FFFFFF")
-    for row in range(1, 56):
+    for row in range(1, 58):
         for col in range(1, 25):
             ws.cell(row=row, column=col).fill = white
             ws.cell(row=row, column=col).font = Font(name="Bahnschrift", size=8)
@@ -1764,9 +1618,8 @@ def build_modo_1_excel_bytes(
         value_rng = rng.replace("Q", "T").replace("S", "X")
         _xlsx_merge_write(ws, value_rng, value, fill="F8FAFC", bold=True, size=8)
 
-    # Sitio + personal — label normal, valor en negrita
-    def _xlsx_write_label_value(ws, cell_range: str, label: str, value: str) -> None:
-        """Escribe etiqueta (normal) + salto + valor (negrita) en una celda fusionada XLSX."""
+    # Sitio + personal
+    def _xlsx_write_label_value(ws, cell_range, label, value):
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.cell.rich_text import CellRichText, TextBlock
         from openpyxl.styles.fonts import Font as RFont
@@ -1791,9 +1644,9 @@ def build_modo_1_excel_bytes(
     _xlsx_write_label_value(ws, "D4:F6", "Sitio:", ctx.get("sitio") or "-")
     _xlsx_write_label_value(ws, "G4:I6", "Área:", ctx.get("area") or "-")
     _xlsx_write_label_value(ws, "J4:M6", "Línea:", ctx.get("linea") or "-")
-    _xlsx_merge_write(ws, "N4:X4", "Personal afectado - Puestos de trabajo", fill="00B0F0", bold=True, size=7)
+    _xlsx_merge_write(ws, "N4:X4", "Personal afectado - Puestos de trabajo", fill=MODO1_COLOR_HEX, bold=True, size=7)
     _xlsx_merge_write(ws, "N5:X5", personal_afectado, fill="FFFFFF", size=7)
-    _xlsx_merge_write(ws, "N6:X6", "Personal autorizado - Puestos de trabajo", fill="00B0F0", bold=True, size=7)
+    _xlsx_merge_write(ws, "N6:X6", "Personal autorizado - Puestos de trabajo", fill=MODO1_COLOR_HEX, bold=True, size=7)
     _xlsx_merge_write(ws, "N7:X7", personal_autorizado, fill="FFFFFF", size=7)
 
     # Equipo
@@ -1801,204 +1654,127 @@ def build_modo_1_excel_bytes(
     _xlsx_merge_write(ws, "D8:X9", f"{_upper(ctx.get('equipo') or 'EQUIPO')}\n{equipo_meta}", fill="FFFFFF", bold=True, size=11)
 
     # Evaluación de riesgos
-    _xlsx_merge_write(ws, "A10:C10", "Evaluación de\nriesgos:", fill="F8FAFC", bold=True, size=7)
-    _xlsx_merge_write(
-        ws,
-        "D10:X10",
-        ctx.get("evaluacion_riesgos") or _format_evaluacion_riesgos(ctx.get("codigo_borrador"), ctx.get("fecha_borrador")),
-        fill="FFFFFF",
-        size=7,
-        align="left",
-    )
+    eval_ref_txt = "Evaluación de riesgos de referencia:  "
+    if eval_riesgos_codigo:
+        eval_ref_txt += f"Código: {eval_riesgos_codigo}"
+    if eval_riesgos_fecha:
+        eval_ref_txt += f"  ·  Fecha: {eval_riesgos_fecha}"
+    _xlsx_merge_write(ws, "A10:X10", eval_ref_txt, fill=MODO1_COLOR_HEX, bold=True, size=7, align="left")
 
     # Tareas
-    _xlsx_merge_write(ws, "A11:C11", "Puntos de\nBloqueo", fill="00B0F0", bold=True, size=7)
-    _xlsx_merge_write(ws, "D11:F11", "Modo de\nIntervención", fill="00B0F0", bold=True, size=7)
-    _xlsx_merge_write(ws, "G11:X11", "Listado de tareas aplicable al presente procedimiento", fill="00B0F0", bold=True, size=7)
-    _xlsx_merge_write(ws, "A12:C15", "0", fill="FFFFFF", bold=True, size=32)
-    _xlsx_merge_write(ws, "D12:F15", "MODO 1", fill="00B0F0", bold=True, size=14)
+    _xlsx_merge_write(ws, "A11:C11", "Puntos de\nBloqueo", fill=MODO1_COLOR_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "D11:F11", "Modo de\nIntervención", fill=MODO1_COLOR_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "G11:X11", "Listado de tareas aplicable al presente procedimiento", fill=MODO1_COLOR_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "A12:C15", "1", fill="FFFFFF", bold=True, size=32)
+    _xlsx_merge_write(ws, "D12:F15", "MODO 1", fill=MODO1_COLOR_HEX, bold=True, size=14)
     _xlsx_merge_write(ws, "G12:X15", "\n".join(f"- {task}" for task in (ctx.get("tareas") or [])), fill="FFFFFF", size=7, align="left")
 
     # Barra + foto
-    _xlsx_merge_write(ws, "A16:X16", "Procedimiento - Control de Energías Peligrosas", fill="00B0F0", bold=True, size=8)
+    _xlsx_merge_write(ws, "A16:X16", "Procedimiento - Control de Energías Peligrosas", fill=MODO1_COLOR_HEX, bold=True, size=8)
     _xlsx_merge_write(ws, "A17:X28", "FOTO DEL PASO A PASO", fill="FFFFFF", font_color="94A3B8", bold=True, size=14)
     _xlsx_add_image(ws, ctx.get("photo_uri", ""), "H17", max_width_px=520, max_height_px=210)
 
-    # Procedimiento: solo Acción y Verificación
+    # Procedimiento: Acción y Verificación
     _xlsx_merge_write(ws, "A29:L29", "Acción", fill="3B3B3B", font_color="FFFFFF", bold=True, size=7)
     _xlsx_merge_write(ws, "M29:X29", "Verificación", fill="3B3B3B", font_color="FFFFFF", bold=True, size=7)
-    accion = (
-        '1. Detener la máquina mediante el paro de operación normal definido para el equipo.\\n\\n'
-        '2. Esperar a que finalice el ciclo o que la máquina alcance una condición detenida y estable.\\n\\n'
-        '3. Confirmar visualmente que no existan movimientos peligrosos antes de abrir la guarda.\\n\\n'
-        '4. Abrir únicamente la guarda o puerta de acceso prevista para la intervención.\\n\\n'
-        '5. Permitir que el interlock de seguridad actúe y mantenga impedido el reinicio de la máquina mientras la guarda permanezca abierta.\\n\\n'
-        '6. Ingresar solo la parte del cuerpo estrictamente necesaria para realizar la intervención autorizada.\\n\\n'
-        '7. Realizar únicamente la tarea prevista, por ejemplo: retirar botella atascada, destrabar elemento, acomodar producto, limpiar obstrucción menor o corregir una condición operativa simple.\\n\\n'
-        '8. Evitar introducir herramientas, partes del cuerpo o elementos adicionales que no estén contemplados en el procedimiento.\\n\\n'
-        '9. Mantener el cuerpo fuera de zonas de atrapamiento, corte, aplastamiento, punzonado, cizallamiento o movimiento residual.\\n\\n'
-        '10. No intervenir componentes que puedan estar asociados a energías peligrosas no controladas, como neumática, hidráulica, eléctrica, térmica o mecánica acumulada.\\n\\n'
-        '11. Si durante la intervención se identifica energía peligrosa no controlada, suspender la tarea y escalar a Modo 3 / LOTO, según corresponda.\\n\\n'
-        '12. Retirar completamente manos, brazos, herramientas, producto suelto o cualquier elemento extraño del interior del equipo.\\n\\n'
-        '13. Cerrar completamente la guarda o puerta de acceso.\\n\\n'
-        '14. Verificar que la guarda quede correctamente cerrada, alineada y enclavada.\\n\\n'
-        '15. Reiniciar el sistema únicamente mediante el comando normal de arranque o reset operativo, según el procedimiento del equipo.\\n\\n'
-        '16. Observar el primer ciclo posterior al reinicio para confirmar que la condición anormal fue corregida.\\n\\n'
-        '17. Registrar la intervención si el SOP, el permiso de trabajo o el sistema de gestión lo exige.'
-    )
-    verificacion = (
-        '1. Verificar que el procedimiento corresponde efectivamente a una tarea de Modo 1, es decir, una intervención operativa rutinaria, breve, prevista y realizada a través de guardas enclavadas.\\n\\n'
-        '2. Verificar que la máquina fue detenida con el paro de operación normal, no con el paro de emergencia.\\n\\n'
-        '3. Verificar que el paro de emergencia no sea utilizado como método habitual de detención operativa.\\n\\n'
-        '4. Verificar que el paro de emergencia quede reservado exclusivamente para situaciones de emergencia real o riesgo inminente.\\n\\n'
-        '5. Verificar que las guardas, puertas o tapas de acceso cuenten con dispositivos de enclavamiento de seguridad adecuados al riesgo.\\n\\n'
-        '6. Verificar que los interlocks sean dispositivos de seguridad diseñados para impedir el arranque o reinicio inesperado con la guarda abierta.\\n\\n'
-        '7. Verificar que los dispositivos de seguridad estén instalados, operativos y en buen estado físico.\\n\\n'
-        '8. Verificar que los interlocks no estén puenteados, anulados, manipulados, vencidos, forzados ni desconectados.\\n\\n'
-        '9. Verificar que no existan imanes, llaves sueltas, sensores anulados, bypass eléctricos, amarras, trabas mecánicas o cualquier otro medio de vulneración del sistema de seguridad.\\n\\n'
-        '10. Verificar que la apertura de la guarda provoque la detención o inhibición segura de los movimientos peligrosos conforme al diseño del equipo.\\n\\n'
-        '11. Verificar que la máquina no pueda reiniciar automáticamente al cerrar la guarda.\\n\\n'
-        '12. Verificar que el reinicio requiera una acción voluntaria e independiente del operador, como reset y/o comando de arranque.\\n\\n'
-        '13. Verificar que las condiciones de seguridad de la máquina estén dadas antes de intervenir.\\n\\n'
-        '14. Verificar que no haya movimiento residual, presión acumulada, partes en caída libre, producto inestable o elementos con posibilidad de liberación inesperada.\\n\\n'
-        '15. Verificar que la intervención no requiera bloqueo, candado, purga o aislamiento de energías peligrosas; si lo requiere, no debe tratarse como Modo 1.\\n\\n'
-        '16. Verificar que no exista exposición a energía neumática, hidráulica, eléctrica, térmica o mecánica acumulada que pueda generar daño durante la intervención.\\n\\n'
-        '17. Verificar que la tarea esté contemplada en el SOP, instructivo operativo, manual del fabricante o evaluación de riesgo aprobada.\\n\\n'
-        '18. Verificar que el operador esté capacitado y autorizado para realizar intervenciones de Modo 1.\\n\\n'
-        '19. Verificar que la zona de intervención esté visible, accesible y libre de obstáculos.\\n\\n'
-        '20. Verificar que el área esté en condiciones de orden y limpieza antes del reinicio.\\n\\n'
-        '21. Verificar que todas las personas estén fuera de la zona peligrosa antes de cerrar la guarda y reiniciar.\\n\\n'
-        '22. Verificar que no queden herramientas, botellas, fragmentos, piezas sueltas o residuos dentro del equipo.\\n\\n'
-        '23. Verificar que la guarda cierre correctamente y que el indicador de seguridad, si existe, confirme condición segura.\\n\\n'
-        '24. Verificar que cualquier falla, repetición del atasco, anomalía o necesidad de ingreso más profundo sea reportada y evaluada antes de continuar.\\n\\n'
-        '25. Verificar que, si el destrabe requiere retirar protecciones, ingresar más allá de lo permitido o controlar energías peligrosas, la tarea sea reclasificada como Modo 3 / LOTO.'
-    )
-    _xlsx_merge_write(ws, "A30:L36", accion, fill="FFFFFF", size=7.5, align="left")
-    _xlsx_merge_write(ws, "M30:X36", verificacion, fill="FFFFFF", size=7.5, align="left")
+    accion_txt = "\n\n".join(_ACCION_MODO1)
+    verif_txt = "\n\n".join(_VERIFICACION_MODO1)
+    _xlsx_merge_write(ws, "A30:L40", accion_txt, fill="FFFFFF", size=7.0, align="left")
+    _xlsx_merge_write(ws, "M30:X40", verif_txt, fill="FFFFFF", size=7.0, align="left")
 
-    # Leyendas — energías con imágenes PNG para franjas exactas
-    _xlsx_merge_write(ws, "A37:X37", "Clasificación de Energías Peligrosas", fill="00B0F0", bold=True, size=8)
+    # Leyendas energías
+    _xlsx_merge_write(ws, "A41:X41", "Clasificación de Energías Peligrosas", fill=MODO1_COLOR_HEX, bold=True, size=8)
 
-    def _xlsx_energy_png(ws, row: int, col_start: int, col_end: int,
-                          label: str, font_color: str,
-                          bg: str, stripe_color: "str | None",
-                          stripe_positions: "list[tuple[int,int]] | None") -> None:
-        """
-        Escribe una celda de leyenda de energía en XLSX.
-        Si stripe_color es None → color sólido.
-        Si stripe_color es str → genera PNG con franjas y lo inserta como imagen flotante.
-        col_start/col_end son índices 1-based (openpyxl).
-        """
+    def _xlsx_energy_png(ws, row, col_start, col_end, label, font_color, bg, stripe_color, stripe_positions):
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
-
         side = Side(style="thin", color="111827")
         border = Border(left=side, right=side, top=side, bottom=side)
-
-        # Calcular letra de celda superior izquierda (para merge y anchor)
         col_letter_start = get_column_letter(col_start)
-        col_letter_end   = get_column_letter(col_end)
+        col_letter_end = get_column_letter(col_end)
         rng = f"{col_letter_start}{row}:{col_letter_end}{row}"
-
         ws.merge_cells(rng)
         top_cell = ws.cell(row=row, column=col_start)
         top_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        top_cell.font = Font(name="Bahnschrift", size=7, bold=True,
-                             color=font_color.replace("#", ""))
-        # Aplicar borde a todas las celdas del rango
+        top_cell.font = Font(name="Bahnschrift", size=7, bold=True, color=font_color.replace("#", ""))
         for c in range(col_start, col_end + 1):
             ws.cell(row=row, column=c).border = border
-
         if stripe_color is None:
-            # Sólido
             top_cell.fill = PatternFill("solid", fgColor=bg.replace("#", ""))
             top_cell.value = label
         else:
-            # Fondo base + imagen PNG con franjas encima
             top_cell.fill = PatternFill("solid", fgColor=bg.replace("#", ""))
             top_cell.value = label
-            # Generar PNG
             try:
                 from PIL import Image as _PIL, ImageDraw as _Draw, ImageFont as _IFont
                 W, H = 160, 32
-                img = _PIL.new("RGB", (W, H),
-                               tuple(int(bg[i:i+2], 16) for i in (0, 2, 4)))
+                img = _PIL.new("RGB", (W, H), tuple(int(bg[i:i+2], 16) for i in (0, 2, 4)))
                 draw = _Draw.Draw(img)
                 sc_rgb = tuple(int(stripe_color[i:i+2], 16) for i in (0, 2, 4))
                 for x0p, x1p in stripe_positions:
-                    draw.rectangle([int(W * x0p / 100), 0,
-                                    int(W * x1p / 100) - 1, H - 1], fill=sc_rgb)
-                # Texto centrado
+                    draw.rectangle([int(W * x0p / 100), 0, int(W * x1p / 100) - 1, H - 1], fill=sc_rgb)
                 fc_rgb = tuple(int(font_color[i:i+2], 16) for i in (0, 2, 4))
                 try:
                     font = _IFont.truetype("arial.ttf", 9)
                 except Exception:
                     font = _IFont.load_default()
                 bbox = draw.textbbox((0, 0), label, font=font)
-                tw = bbox[2] - bbox[0]
-                th = bbox[3] - bbox[1]
-                draw.text(((W - tw) / 2, (H - th) / 2 - bbox[1]),
-                          label, fill=fc_rgb, font=font)
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                buf.seek(0)
+                tw = bbox[2] - bbox[0]; th = bbox[3] - bbox[1]
+                draw.text(((W - tw) / 2, (H - th) / 2 - bbox[1]), label, fill=fc_rgb, font=font)
+                buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
                 from openpyxl.drawing.image import Image as XLImage
-                xl_img = XLImage(buf)
-                xl_img.anchor = f"{col_letter_start}{row}"
+                xl_img = XLImage(buf); xl_img.anchor = f"{col_letter_start}{row}"
                 ws.add_image(xl_img)
             except Exception:
-                pass   # Si PIL falla, queda el color sólido de base
+                pass
 
-    # Cada entrada: (row, col_start, col_end, label, font_color, bg, stripe_color, stripe_positions)
-    # col_start/col_end 1-based; 6 grupos de 4 cols cada uno → cols 1-4, 5-8, 9-12, 13-16, 17-20, 21-24
-    _E_ROW1, _E_ROW2 = 38, 39
+    _E_ROW1, _E_ROW2 = 42, 43
     xlsx_energy = [
         (_E_ROW1,  1,  4, "E: Eléctrica",     "FFFFFF", "000000", None, None),
         (_E_ROW1,  5,  8, "N: Neumática",      "FFFFFF", "0284C7", None, None),
-        (_E_ROW1,  9, 12, "AM: Amoníaco",      "0F172A", "D9D9D9", "F59E0B",
-         [(15, 26), (42, 53), (68, 79)]),          # 3 franjas naranjas
+        (_E_ROW1,  9, 12, "AM: Amoníaco",      "0F172A", "D9D9D9", "F59E0B", [(15, 26), (42, 53), (68, 79)]),
         (_E_ROW1, 13, 16, "T: Térmica",        "FFFFFF", "DC2626", None, None),
         (_E_ROW1, 17, 20, "H: Hidráulica",     "FFFFFF", "7C3AED", None, None),
-        (_E_ROW1, 21, 24, "P: Potencial",      "0F172A", "FFF200", "050505",
-         [(22, 34), (62, 74)]),                     # 2 franjas negras
+        (_E_ROW1, 21, 24, "P: Potencial",      "0F172A", "FFF200", "050505", [(22, 34), (62, 74)]),
         (_E_ROW2,  1,  4, "Q: Química",        "0F172A", "FFF200", None, None),
         (_E_ROW2,  5,  8, "V: Vapor",          "111827", "F59E0B", None, None),
         (_E_ROW2,  9, 12, "A: Agua",           "FFFFFF", "16A34A", None, None),
-        (_E_ROW2, 13, 16, "SC: Soda Cáustica", "0F172A", "D9D9D9", "F59E0B",
-         [(25, 37), (60, 72)]),                     # 2 franjas naranjas
+        (_E_ROW2, 13, 16, "SC: Soda Cáustica", "0F172A", "D9D9D9", "F59E0B", [(25, 37), (60, 72)]),
         (_E_ROW2, 17, 20, "Oz: Ozono",         "0F172A", "BAE6FD", None, None),
         (_E_ROW2, 21, 24, "GC: Gas Carbónico", "111827", "C7D2FE", None, None),
     ]
     for entry in xlsx_energy:
         _xlsx_energy_png(ws, *entry)
 
-    _xlsx_merge_write(ws, "A40:X40", "Clasificación de Candados según sector y función", fill="00B0F0", bold=True, size=8)
-    locks = [
-        ("A41:E42", "Mantenimiento\nIndustrial", "EF0000", "FFFFFF"),
-        ("F41:J42", "Calidad", "FFF200", "0F172A"),
-        ("K41:N42", "Producción", "16A34A", "FFFFFF"),
-        ("O41:S42", "Mantenimiento Edilicio\nContratistas", "0F7DBD", "FFFFFF"),
-        ("T41:X42", "Supervisor MMTO Industrial\n(Bloqueo Departamental)", "050505", "FFFFFF"),
+    _xlsx_merge_write(ws, "A44:X44", "Clasificación de Candados según sector y función", fill=MODO1_COLOR_HEX, bold=True, size=8)
+    lock_items_xl = [
+        ("A45:E46", "Mantenimiento\nIndustrial", "EF0000", "FFFFFF"),
+        ("F45:J46", "Calidad", "FFF200", "0F172A"),
+        ("K45:N46", "Producción", "16A34A", "FFFFFF"),
+        ("O45:S46", "Mantenimiento Edilicio\nContratistas", "0F7DBD", "FFFFFF"),
+        ("T45:X46", "Supervisor MMTO Industrial\n(Bloqueo Departamental)", "050505", "FFFFFF"),
     ]
-    for rng, label, fill, font_color in locks:
+    for rng, label, fill, font_color in lock_items_xl:
         _xlsx_merge_write(ws, rng, label, fill=fill, font_color=font_color, bold=True, size=7)
 
     # LSR
-    _xlsx_merge_write(ws, "A43:X49", "LSR", fill="FFFFFF", font_color="94A3B8", bold=True, size=14)
-    _xlsx_add_image(ws, lsr_uri, "D43", max_width_px=600, max_height_px=130)
+    _xlsx_merge_write(ws, "A47:X53", "LSR", fill="FFFFFF", font_color="94A3B8", bold=True, size=14)
+    _xlsx_add_image(ws, lsr_uri, "D47", max_width_px=600, max_height_px=130)
 
     # Firmas
-    _xlsx_merge_write(ws, "A50:L52", f"Elaborado por: {elaborado_por or '-'}\nPuesto: {puesto_elaborado or '-'} · Fecha: {fecha_firma_txt}", fill="F8FAFC", size=7)
-    _xlsx_merge_write(ws, "M50:X52", f"Aprobado por: {aprobado_por or '-'}\nPuesto: {puesto_aprobado or '-'} · Fecha: {fecha_firma_txt}", fill="F8FAFC", size=7)
+    _xlsx_merge_write(ws, "A54:L56", f"Elaborado por: {elaborado_por or '-'}\nPuesto: {puesto_elaborado or '-'} · Fecha: {fecha_firma_txt}", fill="F8FAFC", size=7)
+    _xlsx_merge_write(ws, "M54:X56", f"Aprobado por: {aprobado_por or '-'}\nPuesto: {puesto_aprobado or '-'} · Fecha: {fecha_firma_txt}", fill="F8FAFC", size=7)
 
-    for row in range(38, 40):
+    for row in range(42, 44):
         ws.row_dimensions[row].height = 26
-    for row in range(41, 43):
+    for row in range(45, 47):
         ws.row_dimensions[row].height = 26
-    for row in range(43, 50):
+    for row in range(47, 54):
         ws.row_dimensions[row].height = 20
+    for row in range(30, 41):
+        ws.row_dimensions[row].height = 22
 
-    ws.print_area = "A1:X52"
+    ws.print_area = "A1:X56"
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
@@ -2024,7 +1800,7 @@ st.markdown(
     """
     <div class="soft-note">
         Importá el borrador JSON generado por la app de análisis. Esta versión genera el procedimiento específico
-        para <strong>Modo 1</strong>, manteniendo una estética tipo ISO y estructura documental lista para descarga en Word DOCX y Excel XLSX.
+        para <strong>Modo 1</strong> (intervención operativa con guardas enclavadas), con diseño documental listo para descarga en Word DOCX y Excel XLSX.
     </div>
     """,
     unsafe_allow_html=True,
@@ -2086,13 +1862,25 @@ with id_col_3:
     modo_inicial_edit = st.text_input("Modo inicial", value=_normalize(ctx_detected.get("modo_inicial")), key="edit_modo_inicial")
 
 modo_final_edit = st.text_input("Modo final", value=_normalize(ctx_detected.get("modo_final")), key="edit_modo_final")
-codigo_borrador_edit = st.text_input("Código del borrador importado", value=_normalize(ctx_detected.get("codigo_borrador")), key="edit_codigo_borrador")
-fecha_borrador_edit = st.text_input("Fecha del borrador importado", value=_normalize(ctx_detected.get("fecha_borrador")), key="edit_fecha_borrador")
-evaluacion_riesgos_edit = st.text_input(
-    "Evaluación de riesgos",
-    value=ctx_detected.get("evaluacion_riesgos") or _format_evaluacion_riesgos(codigo_borrador_edit, fecha_borrador_edit),
-    key="edit_evaluacion_riesgos",
-)
+
+# Evaluación de riesgos
+st.subheader("Evaluación de riesgos de referencia")
+st.caption("Se completa automáticamente desde el JSON. Podés editarlo manualmente antes de generar.")
+eval_col_1, eval_col_2 = st.columns(2)
+with eval_col_1:
+    eval_riesgos_codigo = st.text_input(
+        "Código de la evaluación de riesgos",
+        value=_normalize(ctx_detected.get("codigo_borrador")),
+        key="edit_eval_codigo",
+        help="Se toma automáticamente del campo 'codigo' / 'codigo_borrador' del JSON importado.",
+    )
+with eval_col_2:
+    eval_riesgos_fecha = st.text_input(
+        "Fecha de la evaluación de riesgos",
+        value=_normalize(ctx_detected.get("fecha_borrador")),
+        key="edit_eval_fecha",
+        help="Se toma automáticamente del campo 'fecha' / 'fecha_borrador' del JSON importado.",
+    )
 
 st.subheader("Personal editable")
 st.caption("Estos campos se escriben manualmente antes de generar el procedimiento y se imprimen en el encabezado del documento.")
@@ -2115,24 +1903,17 @@ with person_col_2:
 st.subheader("Tareas aplicables")
 tasks_detected = ctx_detected.get("tareas") or []
 tasks_text = st.text_area(
-    "Listado de tareas desde tareas_predefinidas",
+    "Listado de tareas (tareas_manuales o tareas_predefinidas)",
     value="\n".join(tasks_detected),
     height=120,
-    help="Una tarea por línea. El valor inicial se toma prioritariamente desde la clave tareas_predefinidas del JSON.",
-)
-tareas_manuales_detected = ctx_detected.get("tareas_manuales") or []
-tareas_manuales_text = st.text_area(
-    "Listado de tareas desde tareas_manuales",
-    value="\n".join(tareas_manuales_detected),
-    height=96,
-    help="Una tarea manual por línea. El valor inicial se toma desde la clave tareas_manuales del JSON si está disponible.",
+    help="Una tarea por línea. Se toma prioritariamente desde 'tareas_manuales' del JSON, luego 'tareas_predefinidas'.",
 )
 
 st.subheader("Foto del paso a paso")
 step_photo_file = st.file_uploader(
     "Subir foto o imagen del paso a paso",
     type=["png", "jpg", "jpeg", "webp"],
-    help="Esta imagen reemplaza la foto del equipo del JSON y se inserta en el área central del procedimiento.",
+    help="Esta imagen se inserta en el área central del procedimiento.",
 )
 photo_uri = _uploaded_file_data_uri(step_photo_file)
 if step_photo_file is not None:
@@ -2141,10 +1922,10 @@ else:
     st.caption("Si no se sube una imagen, el procedimiento mostrará un recuadro reservado para la foto del paso a paso.")
 
 with st.expander("Lienzo opcional para tags sobre imagen"):
-    st.caption("El lienzo se habilita solo si el entorno tiene instalada la extensión streamlit-drawable-canvas. En caso contrario, se conserva la imagen cargada sin anotaciones.")
+    st.caption("El lienzo se habilita solo si el entorno tiene instalada la extensión streamlit-drawable-canvas.")
     try:
-        from streamlit_drawable_canvas import st_canvas  # type: ignore
-        from PIL import Image  # type: ignore
+        from streamlit_drawable_canvas import st_canvas
+        from PIL import Image
         if step_photo_file is None:
             st.info("Subí primero una foto del paso a paso para activar el lienzo de marcado.")
         else:
@@ -2165,7 +1946,7 @@ with st.expander("Lienzo opcional para tags sobre imagen"):
                 photo_uri = _bytes_to_data_uri(buffer.getvalue(), "image/png")
                 st.success("Se usará la imagen anotada del lienzo en el procedimiento.")
     except Exception:
-        st.info("Lienzo no disponible en este entorno. Podés subir la foto ya marcada o continuar con la imagen sin anotaciones.")
+        st.info("Lienzo no disponible en este entorno. Podés subir la foto ya marcada o continuar sin anotaciones.")
 
 ctx = dict(ctx_detected)
 ctx.update(
@@ -2180,11 +1961,7 @@ ctx.update(
         "anio": anio_edit,
         "modo_inicial": modo_inicial_edit,
         "modo_final": modo_final_edit,
-        "codigo_borrador": codigo_borrador_edit,
-        "fecha_borrador": fecha_borrador_edit,
-        "evaluacion_riesgos": evaluacion_riesgos_edit or _format_evaluacion_riesgos(codigo_borrador_edit, fecha_borrador_edit),
-        "tareas": _split_tasks(tasks_text) + [task for task in _split_tasks(tareas_manuales_text) if task not in _split_tasks(tasks_text)],
-        "tareas_manuales": _split_tasks(tareas_manuales_text),
+        "tareas": _split_tasks(tasks_text),
         "photo_uri": photo_uri,
     }
 )
@@ -2230,6 +2007,8 @@ procedure_html = build_modo_1_html(
     puesto_elaborado=puesto_elaborado,
     puesto_aprobado=puesto_aprobado,
     fecha_firma=fecha_firma,
+    eval_riesgos_codigo=eval_riesgos_codigo,
+    eval_riesgos_fecha=eval_riesgos_fecha,
 )
 
 st.markdown(
@@ -2242,7 +2021,7 @@ st.markdown(
 )
 
 st.subheader("Vista previa del procedimiento")
-components.html(procedure_html, height=850, scrolling=True)
+components.html(procedure_html, height=950, scrolling=True)
 
 file_stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 base_filename = f"Procedimiento_Modo_1_{file_stamp}"
@@ -2266,6 +2045,8 @@ with col_word:
             puesto_elaborado=puesto_elaborado,
             puesto_aprobado=puesto_aprobado,
             fecha_firma=fecha_firma,
+            eval_riesgos_codigo=eval_riesgos_codigo,
+            eval_riesgos_fecha=eval_riesgos_fecha,
         ),
         file_name=f"{base_filename}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -2289,6 +2070,8 @@ with col_excel:
             puesto_elaborado=puesto_elaborado,
             puesto_aprobado=puesto_aprobado,
             fecha_firma=fecha_firma,
+            eval_riesgos_codigo=eval_riesgos_codigo,
+            eval_riesgos_fecha=eval_riesgos_fecha,
         )
         st.download_button(
             "Descargar Excel XLSX",
@@ -2328,11 +2111,9 @@ with st.expander("Datos editados para generación"):
             "equipo": ctx.get("equipo"),
             "modo_inicial": ctx.get("modo_inicial"),
             "modo_final": ctx.get("modo_final"),
-            "codigo_borrador": ctx.get("codigo_borrador"),
-            "fecha_borrador": ctx.get("fecha_borrador"),
-            "evaluacion_riesgos": ctx.get("evaluacion_riesgos"),
             "tareas": ctx.get("tareas"),
-            "tareas_manuales": ctx.get("tareas_manuales"),
+            "eval_riesgos_codigo": eval_riesgos_codigo,
+            "eval_riesgos_fecha": eval_riesgos_fecha,
             "foto_paso_a_paso_cargada": bool(ctx.get("photo_uri")),
         }
     )
