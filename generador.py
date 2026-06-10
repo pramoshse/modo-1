@@ -78,7 +78,9 @@ st.markdown(
 
 # Color principal Modo 1
 MODO1_COLOR = "#00B0F0"
-MODO1_COLOR_HEX = "00B0F0"  # Sin # para uso en Word/Excel
+MODO1_COLOR_HEX = "00B0F0"       # Sin # para uso en Word/Excel
+MODO1_FONT_COLOR = "#FFFFFF"     # Texto blanco sobre fondo azul
+MODO1_FONT_HEX = "FFFFFF"        # Sin # para Word/Excel
 
 
 # ============================================================
@@ -224,6 +226,28 @@ def _lsr_data_uri() -> str:
         ]
     )
 
+def _parse_date_field(value: Any) -> str:
+    """
+    Normaliza fechas que pueden venir como:
+      - str ISO "2026-06-10"  →  "10/06/2026"
+      - dict {'__type__': 'date', 'value': '2026-06-10'}  →  "10/06/2026"
+      - cualquier otro str  →  se devuelve tal cual (normalizado)
+    """
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        raw = value.get("value") or value.get("date") or ""
+        value = str(raw).strip()
+    value = _normalize(value)
+    if not value:
+        return ""
+    # Intentar parsear ISO YYYY-MM-DD
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", value)
+    if m:
+        return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+    return value
+
+
 def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
     widgets = payload.get("widgets") if isinstance(payload.get("widgets"), dict) else {}
     computed = payload.get("computed") if isinstance(payload.get("computed"), dict) else {}
@@ -276,17 +300,18 @@ def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
     lista_peligros = _get_from_dict(computed, ["lista_peligros_final", "peligros"], [])
     evaluaciones_fine = _get_from_dict(computed, ["evaluaciones_fine"], [])
 
-    # Código del borrador y fecha para Evaluación de riesgos
+    # Código y fecha de la evaluación de riesgos de referencia
     codigo_borrador = _get_from_dict(
         payload,
-        ["codigo", "codigo_borrador", "id", "referencia"],
-        _get_from_dict(widgets, ["codigo", "codigo_borrador", "id", "referencia"], ""),
+        ["codigo_documento", "codigo", "codigo_borrador", "id", "referencia"],
+        _get_from_dict(widgets, ["codigo_documento", "codigo", "codigo_borrador", "id", "referencia"], ""),
     )
-    fecha_borrador = _get_from_dict(
+    fecha_raw = _get_from_dict(
         payload,
-        ["fecha", "fecha_borrador", "fecha_evaluacion"],
-        _get_from_dict(widgets, ["fecha", "fecha_borrador", "fecha_evaluacion"], ""),
+        ["fecha_documento", "fecha", "fecha_borrador", "fecha_evaluacion"],
+        _get_from_dict(widgets, ["fecha_documento", "fecha", "fecha_borrador", "fecha_evaluacion"], ""),
     )
+    fecha_borrador = _parse_date_field(fecha_raw)
 
     sitio = _get_from_dict(widgets, ["sitio", "planta", "site"], "")
     negocio_json = _get_from_dict(widgets, ["negocio", "business", "unidad_negocio"], "")
@@ -563,7 +588,7 @@ def build_modo_1_html(
         font-weight: 900;
         text-align: center;
         background: {MODO1_COLOR};
-        color: #0F172A;
+        color: #FFFFFF;
         font-size: 8.8px;
         padding: 3px 6px;
     }}
@@ -602,11 +627,11 @@ def build_modo_1_html(
 
     /* Barra de evaluación de riesgos */
     .eval-bar {{
-        background: {MODO1_COLOR};
+        background: #FFFFFF;
         color: #0F172A;
-        font-weight: 800;
+        font-weight: 700;
         font-size: 8.5px;
-        padding: 3px 8px;
+        padding: 4px 8px;
         border-left: 1px solid #111827;
         border-right: 1px solid #111827;
         border-bottom: 1px solid #111827;
@@ -615,7 +640,7 @@ def build_modo_1_html(
     .red-header th,
     .red-bar {{
         background: {MODO1_COLOR};
-        color: #0F172A;
+        color: #FFFFFF;
         font-weight: 900;
         text-align: center;
         font-size: 10px;
@@ -639,7 +664,7 @@ def build_modo_1_html(
 
     .mode-box {{
         background: {MODO1_COLOR};
-        color: #0F172A;
+        color: #FFFFFF;
         text-align: center;
         font-size: 17px;
         font-weight: 900;
@@ -719,7 +744,7 @@ def build_modo_1_html(
 
     .legend-title {{
         background: {MODO1_COLOR};
-        color: #0F172A;
+        color: #FFFFFF;
         font-weight: 900;
         text-align: center;
         padding: 2px;
@@ -1276,9 +1301,9 @@ def html_to_word_bytes(
         person_cell._tc.remove(p_elem)
     nested = person_cell.add_table(rows=4, cols=1)
     _docx_apply_table_grid(nested, [6.4])
-    _docx_write_cell(nested.cell(0, 0), "Personal afectado - Puestos de trabajo", bold=True, size=6.8, fill=MODO1_COLOR_HEX)
+    _docx_write_cell(nested.cell(0, 0), "Personal afectado - Puestos de trabajo", bold=True, size=6.8, color=MODO1_FONT_HEX, fill=MODO1_COLOR_HEX)
     _docx_write_cell(nested.cell(1, 0), personal_afectado, size=6.8, fill="FFFFFF")
-    _docx_write_cell(nested.cell(2, 0), "Personal autorizado - Puestos de trabajo", bold=True, size=6.8, fill=MODO1_COLOR_HEX)
+    _docx_write_cell(nested.cell(2, 0), "Personal autorizado - Puestos de trabajo", bold=True, size=6.8, color=MODO1_FONT_HEX, fill=MODO1_COLOR_HEX)
     _docx_write_cell(nested.cell(3, 0), personal_autorizado, size=6.8, fill="FFFFFF")
 
     # Equipo
@@ -1297,22 +1322,22 @@ def html_to_word_bytes(
         eval_ref_txt += f"  ·  Fecha: {eval_riesgos_fecha}"
     if eval_ref_txt.strip().endswith(":"):
         eval_ref_txt += " —"
-    _docx_write_cell(eval_bar.cell(0, 0), eval_ref_txt, bold=True, size=7.0, fill=MODO1_COLOR_HEX, align="left")
+    _docx_write_cell(eval_bar.cell(0, 0), eval_ref_txt, bold=True, size=7.0, color="0F172A", fill="FFFFFF", align="left")
 
     # Tareas
     tasks_table = document.add_table(rows=2, cols=3)
     _docx_apply_table_grid(tasks_table, [2.0, 2.8, 13.0])
     for idx, title in enumerate(["Puntos de\nBloqueo", "Modo de\nIntervención", "Listado de tareas aplicable al presente procedimiento"]):
-        _docx_write_cell(tasks_table.cell(0, idx), title, bold=True, size=7.2, fill=MODO1_COLOR_HEX)
+        _docx_write_cell(tasks_table.cell(0, idx), title, bold=True, size=7.2, color=MODO1_FONT_HEX, fill=MODO1_COLOR_HEX)
     _docx_write_cell(tasks_table.cell(1, 0), "1", bold=True, size=32.0, fill="FFFFFF")
-    _docx_write_cell(tasks_table.cell(1, 1), "MODO 1", bold=True, size=13.0, fill=MODO1_COLOR_HEX)
+    _docx_write_cell(tasks_table.cell(1, 1), "MODO 1", bold=True, size=13.0, color=MODO1_FONT_HEX, fill=MODO1_COLOR_HEX)
     tasks_text = "\n".join(f"- {task}" for task in (ctx.get("tareas") or []))
     _docx_write_cell(tasks_table.cell(1, 2), tasks_text, size=6.8, fill="FFFFFF", align="left")
 
     # Barra
     bar = document.add_table(rows=1, cols=1)
     _docx_apply_table_grid(bar, [17.8])
-    _docx_write_cell(bar.cell(0, 0), "Procedimiento - Control de Energías Peligrosas", bold=True, size=7.6, fill=MODO1_COLOR_HEX)
+    _docx_write_cell(bar.cell(0, 0), "Procedimiento - Control de Energías Peligrosas", bold=True, size=7.6, color=MODO1_FONT_HEX, fill=MODO1_COLOR_HEX)
 
     # Foto
     photo_table = document.add_table(rows=1, cols=1)
@@ -1343,7 +1368,7 @@ def html_to_word_bytes(
     # Leyenda energías
     legend_title = document.add_table(rows=1, cols=1)
     _docx_apply_table_grid(legend_title, [17.8])
-    _docx_write_cell(legend_title.cell(0, 0), "Clasificación de Energías Peligrosas", bold=True, size=7.0, fill=MODO1_COLOR_HEX)
+    _docx_write_cell(legend_title.cell(0, 0), "Clasificación de Energías Peligrosas", bold=True, size=7.0, color=MODO1_FONT_HEX, fill=MODO1_COLOR_HEX)
     energy = document.add_table(rows=2, cols=6)
     _docx_apply_table_grid(energy, [17.8 / 6] * 6)
 
@@ -1468,7 +1493,7 @@ def html_to_word_bytes(
     # Leyenda candados
     lock_title = document.add_table(rows=1, cols=1)
     _docx_apply_table_grid(lock_title, [17.8])
-    _docx_write_cell(lock_title.cell(0, 0), "Clasificación de Candados según sector y función", bold=True, size=7.0, fill=MODO1_COLOR_HEX)
+    _docx_write_cell(lock_title.cell(0, 0), "Clasificación de Candados según sector y función", bold=True, size=7.0, color=MODO1_FONT_HEX, fill=MODO1_COLOR_HEX)
     locks = document.add_table(rows=1, cols=5)
     _docx_apply_table_grid(locks, [17.8 / 5] * 5)
     lock_items = [
@@ -1644,9 +1669,9 @@ def build_modo_1_excel_bytes(
     _xlsx_write_label_value(ws, "D4:F6", "Sitio:", ctx.get("sitio") or "-")
     _xlsx_write_label_value(ws, "G4:I6", "Área:", ctx.get("area") or "-")
     _xlsx_write_label_value(ws, "J4:M6", "Línea:", ctx.get("linea") or "-")
-    _xlsx_merge_write(ws, "N4:X4", "Personal afectado - Puestos de trabajo", fill=MODO1_COLOR_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "N4:X4", "Personal afectado - Puestos de trabajo", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=7)
     _xlsx_merge_write(ws, "N5:X5", personal_afectado, fill="FFFFFF", size=7)
-    _xlsx_merge_write(ws, "N6:X6", "Personal autorizado - Puestos de trabajo", fill=MODO1_COLOR_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "N6:X6", "Personal autorizado - Puestos de trabajo", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=7)
     _xlsx_merge_write(ws, "N7:X7", personal_autorizado, fill="FFFFFF", size=7)
 
     # Equipo
@@ -1659,18 +1684,18 @@ def build_modo_1_excel_bytes(
         eval_ref_txt += f"Código: {eval_riesgos_codigo}"
     if eval_riesgos_fecha:
         eval_ref_txt += f"  ·  Fecha: {eval_riesgos_fecha}"
-    _xlsx_merge_write(ws, "A10:X10", eval_ref_txt, fill=MODO1_COLOR_HEX, bold=True, size=7, align="left")
+    _xlsx_merge_write(ws, "A10:X10", eval_ref_txt, fill="FFFFFF", font_color="0F172A", bold=True, size=7, align="left")
 
     # Tareas
-    _xlsx_merge_write(ws, "A11:C11", "Puntos de\nBloqueo", fill=MODO1_COLOR_HEX, bold=True, size=7)
-    _xlsx_merge_write(ws, "D11:F11", "Modo de\nIntervención", fill=MODO1_COLOR_HEX, bold=True, size=7)
-    _xlsx_merge_write(ws, "G11:X11", "Listado de tareas aplicable al presente procedimiento", fill=MODO1_COLOR_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "A11:C11", "Puntos de\nBloqueo", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "D11:F11", "Modo de\nIntervención", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=7)
+    _xlsx_merge_write(ws, "G11:X11", "Listado de tareas aplicable al presente procedimiento", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=7)
     _xlsx_merge_write(ws, "A12:C15", "1", fill="FFFFFF", bold=True, size=32)
-    _xlsx_merge_write(ws, "D12:F15", "MODO 1", fill=MODO1_COLOR_HEX, bold=True, size=14)
+    _xlsx_merge_write(ws, "D12:F15", "MODO 1", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=14)
     _xlsx_merge_write(ws, "G12:X15", "\n".join(f"- {task}" for task in (ctx.get("tareas") or [])), fill="FFFFFF", size=7, align="left")
 
     # Barra + foto
-    _xlsx_merge_write(ws, "A16:X16", "Procedimiento - Control de Energías Peligrosas", fill=MODO1_COLOR_HEX, bold=True, size=8)
+    _xlsx_merge_write(ws, "A16:X16", "Procedimiento - Control de Energías Peligrosas", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=8)
     _xlsx_merge_write(ws, "A17:X28", "FOTO DEL PASO A PASO", fill="FFFFFF", font_color="94A3B8", bold=True, size=14)
     _xlsx_add_image(ws, ctx.get("photo_uri", ""), "H17", max_width_px=520, max_height_px=210)
 
@@ -1683,7 +1708,7 @@ def build_modo_1_excel_bytes(
     _xlsx_merge_write(ws, "M30:X40", verif_txt, fill="FFFFFF", size=7.0, align="left")
 
     # Leyendas energías
-    _xlsx_merge_write(ws, "A41:X41", "Clasificación de Energías Peligrosas", fill=MODO1_COLOR_HEX, bold=True, size=8)
+    _xlsx_merge_write(ws, "A41:X41", "Clasificación de Energías Peligrosas", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=8)
 
     def _xlsx_energy_png(ws, row, col_start, col_end, label, font_color, bg, stripe_color, stripe_positions):
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -1746,7 +1771,7 @@ def build_modo_1_excel_bytes(
     for entry in xlsx_energy:
         _xlsx_energy_png(ws, *entry)
 
-    _xlsx_merge_write(ws, "A44:X44", "Clasificación de Candados según sector y función", fill=MODO1_COLOR_HEX, bold=True, size=8)
+    _xlsx_merge_write(ws, "A44:X44", "Clasificación de Candados según sector y función", fill=MODO1_COLOR_HEX, font_color=MODO1_FONT_HEX, bold=True, size=8)
     lock_items_xl = [
         ("A45:E46", "Mantenimiento\nIndustrial", "EF0000", "FFFFFF"),
         ("F45:J46", "Calidad", "FFF200", "0F172A"),
