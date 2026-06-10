@@ -258,37 +258,28 @@ def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
         _get_from_dict(widgets, ["modo_final", "modo_convalidado", "modo_resultante"], ""),
     )
 
-    # Prioridad: tareas_manuales > tareas_predefinidas > otras claves
-    tasks_raw = _get_from_dict(
+    # Combinar tareas_predefinidas + tareas_manuales (ambas en el listado)
+    manuales_raw = (_get_from_dict(widgets, ["tareas_manuales"], "")
+                    or _get_from_dict(payload, ["tareas_manuales"], ""))
+    predefinidas_raw = (
+        _get_from_dict(widgets, ["tareas_predefinidas", "tareas_predefinidas_txt", "tareas_preseleccionadas", "tareas_seleccionadas"], "")
+        or _get_from_dict(payload, ["tareas_predefinidas", "tareas_predefinidas_txt", "tareas_preseleccionadas", "tareas_seleccionadas"], "")
+    )
+    fallback_raw = "" if (manuales_raw or predefinidas_raw) else _get_from_dict(
         widgets,
-        ["tareas_manuales"],
+        ["tareas_txt", "tareas", "tareas_aplicables", "descripcion_tareas", "actividad", "actividades"],
         "",
     )
-    if not tasks_raw:
-        tasks_raw = _get_from_dict(
-            payload,
-            ["tareas_manuales"],
-            "",
-        )
-    if not tasks_raw:
-        tasks_raw = _get_from_dict(
-            widgets,
-            ["tareas_predefinidas", "tareas_predefinidas_txt", "tareas_preseleccionadas", "tareas_seleccionadas"],
-            "",
-        )
-    if not tasks_raw:
-        tasks_raw = _get_from_dict(
-            payload,
-            ["tareas_predefinidas", "tareas_predefinidas_txt", "tareas_preseleccionadas", "tareas_seleccionadas"],
-            "",
-        )
-    if not tasks_raw:
-        tasks_raw = _get_from_dict(
-            widgets,
-            ["tareas_txt", "tareas", "tareas_aplicables", "descripcion_tareas", "actividad", "actividades"],
-            "",
-        )
-    tasks = _split_tasks(tasks_raw)
+    tasks_manuales = _split_tasks(manuales_raw)
+    tasks_predefinidas = _split_tasks(predefinidas_raw)
+    tasks_fallback = _split_tasks(fallback_raw)
+    # Unir sin duplicados: predefinidas primero, luego manuales
+    seen: set = set()
+    tasks: List[str] = []
+    for t in tasks_predefinidas + tasks_manuales + tasks_fallback:
+        if t not in seen:
+            seen.add(t)
+            tasks.append(t)
     if not tasks:
         tasks = [
             "Destrabe o liberación de producto atascado en zona accesible mediante guarda enclavada.",
@@ -934,7 +925,7 @@ def build_modo_1_html(
             <th>Listado de tareas aplicable al presente procedimiento</th>
         </tr>
         <tr>
-            <td class="block-one">1</td>
+            <td class="block-one">0</td>
             <td class="mode-box">MODO 1</td>
             <td class="tasks-cell">{task_rows}</td>
         </tr>
@@ -1928,10 +1919,10 @@ with person_col_2:
 st.subheader("Tareas aplicables")
 tasks_detected = ctx_detected.get("tareas") or []
 tasks_text = st.text_area(
-    "Listado de tareas (tareas_manuales o tareas_predefinidas)",
+    "Listado de tareas (tareas_predefinidas + tareas_manuales combinadas)",
     value="\n".join(tasks_detected),
-    height=120,
-    help="Una tarea por línea. Se toma prioritariamente desde 'tareas_manuales' del JSON, luego 'tareas_predefinidas'.",
+    height=140,
+    help="Una tarea por línea. Se combinan automáticamente 'tareas_predefinidas' y 'tareas_manuales' del JSON, sin duplicados. Podés editar el resultado antes de generar.",
 )
 
 st.subheader("Foto del paso a paso")
