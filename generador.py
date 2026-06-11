@@ -935,7 +935,7 @@ def build_modo_1_html(
             <th>Listado de tareas aplicable al presente procedimiento</th>
         </tr>
         <tr>
-            <td class="block-one">1</td>
+            <td class="block-one">0</td>
             <td class="mode-box">MODO 1</td>
             <td class="tasks-cell">{task_rows}</td>
         </tr>
