@@ -327,8 +327,8 @@ def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
         "energias": energias,
         "lista_peligros": lista_peligros,
         "evaluaciones_fine": evaluaciones_fine,
-        "codigo_borrador": codigo_borrador,
-        "fecha_borrador": fecha_borrador,
+        "codigo_documento": codigo_borrador,
+        "fecha_documento": fecha_borrador,
         "photo_uri": "",
     }
 
@@ -338,6 +338,9 @@ def extract_procedure_context(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================
 
 def _tasks_html(tasks: List[str]) -> str:
+    if len(tasks) > 13:
+        inline = " - ".join(_html(task) for task in tasks)
+        return f"<div class='task-line task-inline'>{inline}</div>"
     return "".join(f"<div class='task-line'>- {_html(task)}</div>" for task in tasks)
 
 def _equipment_meta(ctx: Dict[str, Any]) -> str:
@@ -663,7 +666,7 @@ def build_modo_1_html(
     }}
 
     .tasks-cell {{
-        height: 54px;
+        min-height: 36px;
         font-size: 8.6px;
         background: #FFFFFF;
         padding: 5px 8px;
@@ -671,6 +674,13 @@ def build_modo_1_html(
 
     .task-line {{
         margin: 0 0 4px 0;
+    }}
+
+    .task-inline {{
+        margin: 0;
+        line-height: 1.35;
+        white-space: normal;
+        word-break: break-word;
     }}
 
     .photo-area {{
@@ -925,7 +935,7 @@ def build_modo_1_html(
             <th>Listado de tareas aplicable al presente procedimiento</th>
         </tr>
         <tr>
-            <td class="block-one">0</td>
+            <td class="block-one">1</td>
             <td class="mode-box">MODO 1</td>
             <td class="tasks-cell">{task_rows}</td>
         </tr>
@@ -1886,16 +1896,16 @@ eval_col_1, eval_col_2 = st.columns(2)
 with eval_col_1:
     eval_riesgos_codigo = st.text_input(
         "Código de la evaluación de riesgos",
-        value=_normalize(ctx_detected.get("codigo_borrador")),
+        value=_normalize(ctx_detected.get("codigo_documento")),
         key="edit_eval_codigo",
-        help="Se toma automáticamente del campo 'codigo' / 'codigo_borrador' del JSON importado.",
+        help="Se toma automáticamente del campo 'codigo_documento' del JSON importado.",
     )
 with eval_col_2:
     eval_riesgos_fecha = st.text_input(
         "Fecha de la evaluación de riesgos",
-        value=_normalize(ctx_detected.get("fecha_borrador")),
+        value=_normalize(ctx_detected.get("fecha_documento")),
         key="edit_eval_fecha",
-        help="Se toma automáticamente del campo 'fecha' / 'fecha_borrador' del JSON importado.",
+        help="Se toma automáticamente del campo 'fecha_documento' del JSON importado.",
     )
 
 st.subheader("Personal editable")
